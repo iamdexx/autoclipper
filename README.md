@@ -42,7 +42,7 @@ out of the company you built from your garage."*). Voices are real neural TTS, n
 | provider (`narration.provider`) | key | default voice |
 |---|---|---|
 | `gemini` | `GEMINI_API_KEY` (same key as ranking, free tier) | `Puck` — also try Kore, Charon, Fenrir, Aoede, Leda |
-| `elevenlabs` | `ELEVENLABS_API_KEY` (best quality, 10k chars/month free) | Adam |
+| `elevenlabs` | `ELEVENLABS_API_KEY` (best quality, 10k chars/month free) | Liam |
 | `openai` | `OPENAI_API_KEY` | onyx |
 
 `auto` picks ElevenLabs > Gemini > OpenAI. Tune `duck_db`, `max_len_s`, or set

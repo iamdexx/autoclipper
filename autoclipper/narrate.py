@@ -33,13 +33,20 @@ def _gemini_key() -> str | None:
     return None
 
 
+def _elevenlabs_key() -> str | None:
+    for name in ("ELEVENLABS_API_KEY", "elevenlabskey"):
+        if os.getenv(name):
+            return os.getenv(name)
+    return None
+
+
 def pick_provider(cfg: Config) -> str | None:
     p = cfg.narration.provider
     if p == "off":
         return None
     if p != "auto":
         return p
-    if os.getenv("ELEVENLABS_API_KEY"):
+    if _elevenlabs_key():
         return "elevenlabs"
     if _gemini_key():
         return "gemini"
@@ -94,7 +101,7 @@ def tts_gemini(text: str, voice: str, out: Path) -> Path:
 def tts_elevenlabs(text: str, voice: str, out: Path) -> Path:
     r = requests.post(
         f"https://api.elevenlabs.io/v1/text-to-speech/{voice}",
-        headers={"xi-api-key": os.environ["ELEVENLABS_API_KEY"], "Accept": "audio/mpeg"},
+        headers={"xi-api-key": _elevenlabs_key(), "Accept": "audio/mpeg"},
         json={
             "text": text,
             "model_id": os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2"),

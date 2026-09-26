@@ -119,6 +119,7 @@ def test_narration_provider_selection(monkeypatch):
     cfg = Config.load(ROOT / "config.yaml")
     for k in (
         "ELEVENLABS_API_KEY",
+        "elevenlabskey",
         "GEMINI_API_KEY",
         "GOOGLE_API_KEY",
         "Geminikey",
