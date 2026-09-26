@@ -254,6 +254,50 @@ def test_render_narrated_and_concat(tmp_path, monkeypatch):
     assert own and abs(narrate.duration(own) - 5.0) < 0.2
 
 
+def _mean_db(path: Path, start: float, end: float) -> float:
+    err = subprocess.run(
+        ["ffmpeg", "-loglevel", "info", "-ss", f"{start}", "-to", f"{end}", "-i", str(path),
+         "-af", "volumedetect", "-f", "null", "-"],
+        capture_output=True, text=True,
+    ).stderr  # fmt: skip
+    return float(err.split("mean_volume:")[1].split("dB")[0])
+
+
+def test_payoff_footage_comes_back_up_after_the_narrator_and_the_video_fades_out(tmp_path):
+    cfg = _cfg(tmp_path)
+    src = _src(tmp_path)
+    voice = tmp_path / "voice.m4a"
+    subprocess.check_call(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=1000",
+         "-t", "2", "-c:a", "aac", str(voice)]
+    )  # fmt: skip
+    words = narrate.even_words("number one", 2.0)
+    # 2s of narration, then 3s of the footage playing out with its audio back up
+    out = render.render_narrated(
+        src,
+        [(0.5, 5.0)],
+        voice,
+        words,
+        "",
+        "#1",
+        cfg,
+        tmp_path / "1.mp4",
+        duck_db=-40,
+        unduck_at=2.0,
+    )
+    ducked = _mean_db(out, 2.0, 2.4)  # narrator's over, footage still coming up
+    up = _mean_db(out, 3.5, 5.0)
+    assert up - ducked > 6, (ducked, up)
+    # without unduck_at the footage stays buried the whole way
+    flat = render.render_narrated(
+        src, [(0.5, 5.0)], voice, words, "", "#1", cfg, tmp_path / "flat.mp4", duck_db=-40
+    )
+    assert _mean_db(flat, 3.5, 5.0) < up - 10
+    final = render.concat([out, out], tmp_path / "final.mp4", fade_out=1.0)
+    assert abs(narrate.duration(final) - 10.0) < 0.3
+    assert _mean_db(final, 9.6, 10.0) < _mean_db(final, 8.5, 9.0) - 6
+
+
 def test_cut_plan():
     # two 2s windows spread over 13s of footage: one at the start, one at the end
     assert render.cut_plan(13.0, 4.0, 2) == [(0.0, 2.0), (11.0, 2.0)]

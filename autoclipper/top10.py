@@ -304,7 +304,7 @@ def _renumber(script: Script, cfg: Config, kept: int) -> None:
 def _finish(parts: list[Path], title: str, cfg: Config, vdir: Path) -> Path:
     """Stitch the segments and lay one continuous music bed under the whole thing."""
     out = vdir / f"{_slug(title)}.mp4"
-    render.concat(parts, out)
+    render.concat(parts, out, fade_out=render.OUTRO_FADE_S)
     bed = None
     if sfx.music_enabled(cfg):
         bed = sfx.music_bed(narrate.duration(out), cfg, vdir / "music.m4a")
@@ -350,6 +350,8 @@ def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
         else:
             voice, words = None, narrate.even_words(text, t.item_min_s)
             dur = t.item_min_s
+        if i == len(segments) - 1:
+            dur += t.listicle_outro_s  # the last photo holds a beat instead of cutting off
         # the intro shares the first item's photo: zoom out on the intro, in on the item
         zoom_in = not (script.intro and i == 0)
         render.render_still(pics[id(entry)], dur, voice, words, cfg, seg, zoom_in=zoom_in)
@@ -410,12 +412,17 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
         voiced = None
         if not ranking or t.narrate:
             voiced = narrate.synthesize_timed(text, cfg, seg.with_suffix(".voice.m4a"))
+        unduck_at = None
         if voiced:
             voice, words = voiced
             dur = max(t.item_min_s, narrate.duration(voice) + 0.4)  # never cut speech
         else:
             voice, words = None, [] if ranking else narrate.even_words(text, t.item_min_s)
             dur = t.item_min_s
+        if i == len(segments) - 1 and t.outro_s > 0:
+            # #1 is the payoff: its footage plays on after the last line with its own audio
+            unduck_at = dur - 0.2
+            dur += t.outro_s
         src = footage[id(entry)]
         avail = narrate.duration(src)
         # the intro rides on entry N's footage: play its cuts in reverse order so the two
@@ -446,6 +453,7 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
             sfx=whoosh,
             duck_db=duck,
             events=events,
+            unduck_at=unduck_at,
         )
         parts.append(seg)
     return _finish(parts, script.title, cfg, vdir)

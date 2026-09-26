@@ -54,6 +54,9 @@ def _wrap(text: str, max_chars: int) -> list[str]:
 
 
 PAUSE_GAP = 0.5  # silence this long between two words starts a new caption line
+MIN_TAIL = 0.3  # a creator clip never ends closer than this to its last word
+UNDUCK_S = 0.6  # how long the footage audio takes to come back up after the narrator
+OUTRO_FADE_S = 0.5  # every video eases out over its last half second
 
 
 def _group_words(words: list[Word], max_words: int, max_chars: int) -> list[list[Word]]:
@@ -216,11 +219,13 @@ def render_narrated(
     duck_db: float | None = None,
     events: list[str] | None = None,
     one_word: bool | None = None,
+    unduck_at: float | None = None,
 ) -> Path:
     """A segment fully voiced by the narrator (Top-10 entries): source audio stays ducked the
     whole time, captions come from the narration's word timings, badge = big rank number.
     `cuts` = (start, length) windows of `source` shown back to back, each with a zoom punch;
-    `sfx` plays at the start (the rank reveal)."""
+    `sfx` plays at the start (the rank reveal). `unduck_at` = when the narrator is done and the
+    footage's own audio comes back up (the payoff clip playing out)."""
     out.parent.mkdir(parents=True, exist_ok=True)
     dur = sum(ln for _, ln in cuts)
     ass_path = out.with_suffix(".ass")
@@ -252,7 +257,11 @@ def render_narrated(
     pad = f"apad=whole_dur={dur:.3f},atrim=0:{dur:.3f}"
     tracks = []
     if src_audio:
-        vf += f";[srca]volume={duck:.3f},{pad}[duck]"
+        vol = f"volume={duck:.3f}"
+        if unduck_at is not None and unduck_at < dur:
+            up = f"{duck:.3f}+(1-{duck:.3f})*min(1,(t-{unduck_at:.3f})/{UNDUCK_S})"
+            vol = f"volume='if(lt(t,{unduck_at:.3f}),{duck:.3f},{up})':eval=frame"
+        vf += f";[srca]{vol},{pad}[duck]"
         tracks.append("[duck]")
     if voice:
         vf += f";[{len(inputs) // 2}:a]aresample=48000,{pad}[nar]"
@@ -345,23 +354,40 @@ def render_still(
     return out
 
 
-def concat(parts: list[Path], out: Path) -> Path:
-    """Join segments rendered with the same _ENC settings."""
+def concat(parts: list[Path], out: Path, fade_out: float = 0.0) -> Path:
+    """Join segments rendered with the same _ENC settings; `fade_out` eases the audio out over
+    the last N seconds so the video ends on a beat instead of a cut."""
     lst = out.with_suffix(".txt")
     lst.write_text("".join(f"file '{p.resolve().as_posix()}'\n" for p in parts))
+    audio = ["-c:a", "copy"]
+    if fade_out > 0:
+        total = sum(narrate.duration(p) for p in parts)
+        st = max(0.0, total - fade_out)
+        audio = ["-af", f"afade=t=out:st={st:.3f}:d={fade_out:.3f}", "-c:a", "aac", "-b:a", "160k"]
     subprocess.check_call(
         ["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(lst)]
-        + ["-c", "copy", "-movflags", "+faststart", str(out)]
+        + ["-c:v", "copy", *audio, "-movflags", "+faststart", str(out)]
     )
     lst.unlink()
     return out
+
+
+def clip_tail(moment: Moment, segments: list[Segment], source_len: float, cfg: Config) -> float:
+    """How long the footage rolls on after the moment's last line: up to clips.tail_s, but never
+    into the next sentence (so the fade-out doesn't catch half a word) or past the source."""
+    tail = min(cfg.clips.tail_s, max(0.0, source_len - moment.end))
+    nxt = [s.start for s in segments if s.start >= moment.end - 0.01]
+    if nxt:
+        tail = min(tail, max(MIN_TAIL, min(nxt) - moment.end))
+    return round(max(0.0, tail), 3)
 
 
 def render_clip(
     source: Path, moment: Moment, segments: list[Segment], cfg: Config, out: Path
 ) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
-    dur = moment.end - moment.start
+    tail = clip_tail(moment, segments, narrate.duration(source), cfg)
+    dur = moment.end - moment.start + tail
 
     # the narrator's hook is its own intro: the clip's first frame is held and its audio
     # silent while he speaks, captions follow his words; then the clip plays with its own
@@ -385,6 +411,8 @@ def render_clip(
             voice, voice_words, voice_len, tempo = None, [], 0.0, 1.0
     intro = voice_len + lead + PAUSE_GAP + 0.1 if voice else 0.0
     total = dur + intro
+    # the ending is a beat, not a cut: the picture rolls on while the audio eases out
+    fade = f"afade=t=out:st={max(0.0, total - tail):.3f}:d={max(tail, 0.05):.3f}" if tail else ""
 
     words = [Word(w.start / tempo + lead, w.end / tempo + lead, w.text) for w in voice_words]
     words += [
@@ -406,14 +434,15 @@ def render_clip(
     if _has_audio(source):
         audio_map = ["-map", "[a]"]
         if not voice:
-            vf += f";[0:a]{NORM}[a]"
+            vf += f";[0:a]{NORM}{',' + fade if fade else ''}[a]"
     if voice:
         ms = int(hold * 1000)
         vf += (
             f";[0:a]volume=0:enable='lt(t,{pre:.3f})',adelay={ms}|{ms},aresample=48000[held];"
             f"[1:a]atempo={tempo:.3f},adelay={int(lead * 1000)}|{int(lead * 1000)},"
             f"aresample=48000,apad[nar];"
-            f"[held][nar]amix=inputs=2:duration=first:dropout_transition=0,{NORM}[a]"
+            f"[held][nar]amix=inputs=2:duration=first:dropout_transition=0,{NORM}"
+            f"{',' + fade if fade else ''}[a]"
         )
         inputs += ["-i", str(voice)]
     cmd = [

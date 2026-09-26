@@ -113,12 +113,29 @@ def test_render_mixes_narration(tmp_path, monkeypatch):
         ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(out)]
     ).decode()  # fmt: skip
     assert streams.split() == ["video", "audio"]
-    # 2s tone at 1.3x = 1.54s of hook + 0.85s of lead/tail ahead of the 6s clip
-    assert abs(narrate.duration(out) - (6.0 + 1.54 + 0.85)) < 0.3
+    # 2s tone at 1.3x = 1.54s of hook + 0.85s of lead/gap ahead of the 6s clip, then the clip
+    # rolls on for the 0.3s minimum tail (the next sentence starts right at 6.0)
+    assert abs(narrate.duration(out) - (6.0 + 1.54 + 0.85 + 0.3)) < 0.3
     assert (tmp_path / "clip.voice.m4a").exists()
     ass = (tmp_path / "clip.ass").read_text()
     caps = [ln for ln in ass.splitlines() if ",Cap," in ln]
     assert "WAIT" in caps[0].upper() and caps[3].split(",")[1] >= "0:00:02.0"  # clip words after
+
+
+def test_clip_tail_rolls_on_but_never_into_the_next_sentence(tmp_path):
+    cfg = _cfg(tmp_path)
+    segs = _segments(4)  # sentences at 0-2, 2-4, 4-6, 6-8
+    # a moment that ends between sentences gets the full tail
+    m = Moment(0.0, 6.0, "h", "r", 1.0)
+    assert render.clip_tail(Moment(0.0, 4.6, "h", "r", 1.0), segs, 30.0, cfg) == 1.0
+    # ...but stops short of the next sentence (with a floor so the ending is still a beat)
+    assert render.clip_tail(Moment(0.0, 5.5, "h", "r", 1.0), segs, 30.0, cfg) == 0.5
+    assert render.clip_tail(m, segs, 30.0, cfg) == 0.3
+    # and never runs past the end of the source
+    assert render.clip_tail(Moment(0.0, 8.0, "h", "r", 1.0), segs, 8.4, cfg) == 0.4
+    assert render.clip_tail(Moment(0.0, 8.0, "h", "r", 1.0), segs, 8.0, cfg) == 0.0
+    out = render.render_clip(_src(tmp_path), m, segs, cfg, tmp_path / "clip.mp4")
+    assert abs(narrate.duration(out) - 6.3) < 0.2
 
 
 def test_narration_provider_selection(monkeypatch):
@@ -279,7 +296,7 @@ def test_top10_build_drops_entries_without_footage(tmp_path, monkeypatch):
         out.write_bytes(b"x")
 
     monkeypatch.setattr(top10.render, "render_narrated", fake_render)
-    monkeypatch.setattr(top10.render, "concat", lambda parts, out: out)
+    monkeypatch.setattr(top10.render, "concat", lambda parts, out, **kw: out)
 
     top10.build(script, cfg, tmp_path / "t")
     assert [e.name for e in script.entries] == ["play 0", "play 2", "play 3"]

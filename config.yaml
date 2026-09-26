@@ -18,6 +18,7 @@ clips:
   min_len_s: 20
   max_len_s: 60
   target_len_s: 40
+  tail_s: 1.0           # footage rolls on this long after the last line, audio easing out
 
 captions:
   style: highlight # every format: 3-word line, the word being spoken turns yellow; `word` = one big white word at a time
@@ -62,6 +63,8 @@ top10:
   narrate: true         # ranking: Liam voices a hook + one line per clip (false = clip audio only)
   items: 6              # ranking ~6 (20-30s video); countdown 10
   item_min_s: 3.5
+  outro_s: 2.0          # #1's footage plays on (its audio back up) this long after the last line
+  listicle_outro_s: 0.8 # listicle: the last photo holds this long after the last word
   cuts_per_entry: 1     # footage cuts per entry, each with a zoom punch (2 suits countdown)
   sfx: true             # whoosh/hit on every rank reveal
   source_db: -26        # footage's own audio under the narration (-100 = effectively mute)

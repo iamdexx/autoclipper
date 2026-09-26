@@ -23,6 +23,7 @@ class ClipRules:
     min_len_s: float = 20
     max_len_s: float = 60
     target_len_s: float = 40
+    tail_s: float = 1.0  # footage keeps rolling this long after the last line, audio fading out
 
 
 @dataclass
@@ -133,6 +134,8 @@ class TopTen:
     items: int = 6
     item_min_s: float = 3.5  # each entry lasts at least this (longer if the narration is)
     listicle_gap_s: float = 0.25  # listicle: pause between items
+    outro_s: float = 2.0  # #1's footage plays on (audio back up) this long after the last line
+    listicle_outro_s: float = 0.8  # listicle: the last photo holds this long after the last word
     item_max_s: float = 10.0  # how much footage to fetch per entry
     source_max_duration_s: int = 30 * 60  # only clip from sources up to this long
     topics: list[str] = field(default_factory=list)  # fixed ideas; empty = derive from trends
