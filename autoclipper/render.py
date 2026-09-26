@@ -36,6 +36,43 @@ def words_in(segments: list[Segment], start: float, end: float) -> list[Word]:
     ]
 
 
+def _wrap(text: str, max_chars: int) -> list[str]:
+    """Greedy word wrap; never splits a word, never emits an empty line."""
+    out: list[str] = []
+    cur = ""
+    for w in text.split():
+        if cur and len(cur) + 1 + len(w) > max_chars:
+            out.append(cur)
+            cur = w
+        else:
+            cur = f"{cur} {w}" if cur else w
+    if cur:
+        out.append(cur)
+    return out or [text]
+
+
+def _group_words(words: list[Word], max_words: int, max_chars: int) -> list[list[Word]]:
+    """Chunk words so each caption line fits: at most max_words and max_chars per line.
+    A sentence-ending word closes the line so lines don't straddle sentences."""
+    groups: list[list[Word]] = []
+    cur: list[Word] = []
+    cur_len = 0
+    for w in words:
+        add = len(w.text) + (1 if cur else 0)
+        if cur and (len(cur) >= max_words or cur_len + add > max_chars):
+            groups.append(cur)
+            cur, cur_len = [], 0
+            add = len(w.text)
+        cur.append(w)
+        cur_len += add
+        if w.text[-1:] in ".!?" and len(cur) > 1:
+            groups.append(cur)
+            cur, cur_len = [], 0
+    if cur:
+        groups.append(cur)
+    return groups
+
+
 def build_ass(words: list[Word], hook: str, dur: float, cfg: Config) -> str:
     c = cfg.captions
     header = f"""[Script Info]
@@ -54,10 +91,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     lines = []
     if hook:
-        lines.append(f"Dialogue: 0,{_ts(0)},{_ts(min(dur, 4.0))},Hook,,0,0,0,,{_esc(hook.upper())}")
-    n = c.words_per_line
-    for i in range(0, len(words), n):
-        group = words[i : i + n]
+        hook_text = "\\N".join(_esc(ln) for ln in _wrap(hook.upper(), c.hook_chars_per_line))
+        lines.append(f"Dialogue: 0,{_ts(0)},{_ts(min(dur, 4.0))},Hook,,0,0,0,,{hook_text}")
+    for group in _group_words(words, c.words_per_line, c.chars_per_line):
         g_start = group[0].start
         g_end = max(group[-1].end, g_start + 0.3)
         # one dialogue line per word so the current word is highlighted

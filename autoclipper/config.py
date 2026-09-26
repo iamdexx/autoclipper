@@ -30,6 +30,8 @@ class CaptionStyle:
     font: str = "DejaVu Sans"
     size: int = 64
     words_per_line: int = 3
+    chars_per_line: int = 22  # fits 1080px at size 64 with outline
+    hook_chars_per_line: int = 24
     highlight_color: str = "&H0000FFFF"  # ASS BGR: yellow
     base_color: str = "&H00FFFFFF"
     outline: int = 4
