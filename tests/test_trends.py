@@ -307,6 +307,7 @@ def test_one_word_captions(tmp_path):
 
 def test_one_word_caption_clears_during_a_long_pause(tmp_path):
     cfg = _cfg(tmp_path)
+    cfg.captions.style = "word"
     words = [Word(0.0, 0.4, "Wait"), Word(3.0, 3.4, "what")]
     lines = [ln for ln in render.build_ass(words, "", 4.0, cfg).splitlines() if ln.startswith("D")]
     assert lines[0].split(",")[2] == "0:00:01.00"  # 0.4 + 0.6 hold, not 3.0
@@ -314,6 +315,7 @@ def test_one_word_caption_clears_during_a_long_pause(tmp_path):
 
 def test_one_word_captions_never_overlap(tmp_path):
     cfg = _cfg(tmp_path)
+    cfg.captions.style = "word"
     words = [Word(0.0, 0.1, "you"), Word(0.15, 0.3, "hear"), Word(0.35, 0.6, "how")]
     lines = [ln for ln in render.build_ass(words, "", 2.0, cfg).splitlines() if ln.startswith("D")]
     ends = [ln.split(",")[2] for ln in lines]
@@ -329,10 +331,11 @@ def test_caption_style_is_one_setting_for_every_format(tmp_path):
         return "\n".join(ln for ln in ass.splitlines() if ln.startswith("Dialogue"))
 
     default = dialogue(render.build_ass(words, "", 2.0, cfg))  # what every format gets
-    assert cfg.captions.style == "word"
-    assert cfg.captions.highlight_color not in default and ",Cap," not in default
-    cfg.captions.style = "highlight"
-    assert cfg.captions.highlight_color in dialogue(render.build_ass(words, "", 2.0, cfg))
+    assert cfg.captions.style == "highlight"
+    assert cfg.captions.highlight_color in default and ",Word," not in default
+    cfg.captions.style = "word"
+    alt = dialogue(render.build_ass(words, "", 2.0, cfg))
+    assert cfg.captions.highlight_color not in alt and ",Cap," not in alt
 
 
 def test_image_matching():

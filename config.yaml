@@ -20,7 +20,7 @@ clips:
   target_len_s: 40
 
 captions:
-  style: word # one big word at a time in every format; `highlight` = 3-word line with the spoken word coloured
+  style: highlight # every format: 3-word line, the word being spoken turns yellow; `word` = one big white word at a time
   size: 64
   words_per_line: 3 # highlight style only
 

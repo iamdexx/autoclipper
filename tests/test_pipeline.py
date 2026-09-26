@@ -116,8 +116,8 @@ def test_render_mixes_narration(tmp_path, monkeypatch):
     assert abs(narrate.duration(out) - (6.0 + 1.54 + 0.55)) < 0.3
     assert (tmp_path / "clip.voice.m4a").exists()
     ass = (tmp_path / "clip.ass").read_text()
-    first = [ln for ln in ass.splitlines() if ",Word," in ln]
-    assert first[0].endswith("WAIT") and first[3].split(",")[1] >= "0:00:02.0"  # clip words after
+    caps = [ln for ln in ass.splitlines() if ",Cap," in ln]
+    assert "WAIT" in caps[0].upper() and caps[3].split(",")[1] >= "0:00:02.0"  # clip words after
 
 
 def test_narration_provider_selection(monkeypatch):
