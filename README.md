@@ -49,8 +49,8 @@ out of the company you built from your garage."*). Voices are real neural TTS, n
 
 | provider (`narration.provider`) | key | default voice |
 |---|---|---|
-| `edge` | none — Microsoft's neural voices via the Edge read-aloud endpoint (unofficial, free) | `en-US-AndrewMultilingualNeural` — also Brian, Guy, Christopher, Roger (`edge-tts --list-voices`) |
-| `azure` | `AZURE_SPEECH_KEY` + `AZURE_SPEECH_REGION` (Speech resource, Free F0 = 500k chars/month) | `en-US-AndrewMultilingualNeural` — also Brian, Davis, Guy, Steffan, Christopher |
+| `edge` | none — Microsoft's neural voices via the Edge read-aloud endpoint (unofficial, free) | `en-US-GuyNeural` — also Andrew, Brian, Christopher, Roger (`edge-tts --list-voices`) |
+| `azure` | `AZURE_SPEECH_KEY` + `AZURE_SPEECH_REGION` (Speech resource, Free F0 = 500k chars/month) | `en-US-GuyNeural` — also Andrew, Brian, Davis, Steffan, Christopher |
 | `google` | `GOOGLE_TTS_API_KEY` (Cloud Text-to-Speech, Chirp 3 HD, 1M chars/month free) | `Charon` — also Fenrir, Orus, Puck, Algenib, Iapetus |
 | `elevenlabs` | `ELEVENLABS_API_KEY` (most natural, 10k chars/month free) | Liam |
 | `gemini` | `GEMINI_API_KEY` (same key as ranking, free tier) | `Puck` — also try Kore, Charon, Fenrir, Aoede, Leda |

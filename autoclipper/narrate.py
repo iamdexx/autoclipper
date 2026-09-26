@@ -103,7 +103,7 @@ def pick_provider(cfg: Config) -> str | None:
 
 
 def tts_azure(text: str, voice: str, rate: float, style: str, out: Path) -> Path:
-    """Azure Speech neural voice (`voice` is the short name, e.g. en-US-AndrewMultilingualNeural).
+    """Azure Speech neural voice (`voice` is the short name, e.g. en-US-GuyNeural).
     `style` (excited, cheerful, ...) is applied when the voice supports it; ignored otherwise."""
     body = _esc_xml(text)
     if rate != 1.0:

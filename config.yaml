@@ -32,9 +32,9 @@ publishing:
 
 narration:
   provider: auto        # auto = edge (no key) > azure > google > elevenlabs > gemini > openai, next one when a call fails | off
-  edge_voice: en-US-AndrewMultilingualNeural  # Brian/Guy/Christopher/Roger ... (edge-tts --list-voices)
+  edge_voice: en-US-GuyNeural  # AndrewMultilingual/BrianMultilingual/Christopher/Roger ... (edge-tts --list-voices)
   edge_rate: 1.05
-  azure_voice: en-US-AndrewMultilingualNeural  # Brian/Davis/Guy/Steffan/Christopher ...
+  azure_voice: en-US-GuyNeural  # AndrewMultilingual/BrianMultilingual/Davis/Steffan/Christopher ...
   azure_rate: 1.05
   google_voice: Charon  # Cloud TTS Chirp 3 HD: Fenrir, Orus, Puck, Algenib, Iapetus ...
   google_rate: 1.0
