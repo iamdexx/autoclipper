@@ -182,6 +182,9 @@ def cut_plan(avail: float, dur: float, cuts: int) -> list[tuple[float, float]]:
     return [(round(i * step, 3), round(piece, 3)) for i in range(cuts)]
 
 
+# every output lands at the same loudness (-16 LUFS, the short-form norm) whatever the source
+NORM = "loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000"
+
 _ENC = [
     *("-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", "30"),
     *("-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2"),
@@ -253,10 +256,10 @@ def render_narrated(
     if len(tracks) > 1:
         vf += (
             f";{''.join(tracks)}amix=inputs={len(tracks)}:duration=shortest"
-            f":dropout_transition=0:normalize=0,{edge}[a]"
+            f":dropout_transition=0:normalize=0,{NORM},{edge}[a]"
         )
     elif tracks:
-        vf += f";{tracks[0]}{edge}[a]"
+        vf += f";{tracks[0]}{NORM},{edge}[a]"
     else:
         vf += f";anullsrc=r=48000:cl=stereo,atrim=0:{dur:.3f}[a]"
     cmd = ["ffmpeg", "-y", "-loglevel", "error", *inputs, "-filter_complex", vf]
@@ -322,7 +325,7 @@ def render_still(
     inputs = ["-i", str(image)]
     if voice:
         inputs += ["-i", str(voice)]
-        vf += f";[1:a]aresample=48000,apad=whole_dur={dur:.3f},atrim=0:{dur:.3f}[a]"
+        vf += f";[1:a]{NORM},apad=whole_dur={dur:.3f},atrim=0:{dur:.3f}[a]"
     else:
         vf += f";anullsrc=r=48000:cl=stereo,atrim=0:{dur:.3f}[a]"
     cmd = ["ffmpeg", "-y", "-loglevel", "error", *inputs, "-filter_complex", vf]
@@ -376,7 +379,11 @@ def render_clip(
 
     vf = _vf(ass_path)
     inputs = ["-ss", f"{moment.start:.3f}", "-t", f"{dur:.3f}", "-i", str(source)]
-    audio_map = ["-map", "0:a?"]
+    audio_map: list[str] = []
+    if _has_audio(source):
+        audio_map = ["-map", "[a]"]
+        if not voice:
+            vf += f";[0:a]{NORM}[a]"
     if voice:
         duck = 10 ** (cfg.narration.duck_db / 20)
         lead = 0.25
@@ -384,10 +391,9 @@ def render_clip(
             f";[0:a]volume={duck:.3f}:enable='lt(t,{voice_len + lead + 0.3:.2f})'[duck];"
             f"[1:a]atempo={tempo:.3f},adelay={int(lead * 1000)}|{int(lead * 1000)},"
             f"aresample=48000,apad[nar];"
-            f"[duck][nar]amix=inputs=2:duration=first:dropout_transition=0,volume=2[a]"
+            f"[duck][nar]amix=inputs=2:duration=first:dropout_transition=0,{NORM}[a]"
         )
         inputs += ["-i", str(voice)]
-        audio_map = ["-map", "[a]"]
     cmd = [
         "ffmpeg",
         "-y",

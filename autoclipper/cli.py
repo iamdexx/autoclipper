@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -48,8 +49,21 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("run", help="one pass: creators + trends + top10 (whatever is enabled)")
     sub.add_parser("watch", help="loop `run` forever every poll_interval_s")
 
-    a = sub.add_parser("auth", help="interactive OAuth setup")
-    a.add_argument("platform", choices=["youtube"])
+    a = sub.add_parser("auth", help="one-time login per platform, or `check` the stored creds")
+    a.add_argument("platform", choices=["youtube", "tiktok", "check"])
+    a.add_argument(
+        "--redirect-uri",
+        default="https://localhost:8080/callback",
+        help="tiktok: a redirect URI registered on your TikTok app",
+    )
+
+    pb = sub.add_parser("publish", help="really post one finished video (ignores dry_run)")
+    pb.add_argument("video")
+    pb.add_argument("--title", required=True, help="hook / title line")
+    pb.add_argument("--creator", default="")
+    pb.add_argument("--hashtags", default="", help="space separated")
+    pb.add_argument("--kind", choices=["clip", "top10"], default="clip")
+    pb.add_argument("--platform", choices=["youtube", "tiktok", "instagram"], default="")
 
     sub.add_parser("status", help="show processed videos and posts")
 
@@ -148,9 +162,41 @@ def main(argv: list[str] | None = None) -> int:
                 logging.exception("run failed")
             time.sleep(cfg.poll_interval_s)
     if args.cmd == "auth":
-        publish.youtube_auth(interactive=True)
-        print("YouTube authorised.")
+        if args.platform == "youtube":
+            publish.youtube_auth(interactive=True)
+            tok = os.getenv("YT_TOKEN", "secrets/yt_token.json")
+            print(f"YouTube authorised. Token saved to {tok}.")
+            print("For GitHub Actions, paste that file's contents into the YT_TOKEN_JSON secret.")
+        elif args.platform == "tiktok":
+            r = publish.tiktok_auth(args.redirect_uri)
+            print(f"TikTok authorised as open_id {r.get('open_id')} (scope {r.get('scope')}).")
+            print("Store this as the TIKTOK_REFRESH_TOKEN secret (valid ~1 year):\n")
+            print(r["refresh_token"])
+        else:
+            ok = True
+            for name, res in publish.check_credentials(cfg).items():
+                print(f"{name:<10} {res}")
+                ok &= res.startswith("ok")
+            return 0 if ok else 1
         return 0
+    if args.cmd == "publish":
+        video = Path(args.video)
+        if not video.exists():
+            print(f"no such file: {video}", file=sys.stderr)
+            return 1
+        res = publish.publish_all(
+            video,
+            args.title,
+            args.creator,
+            args.hashtags.split(),
+            cfg,
+            kind=args.kind,
+            only=args.platform,
+            force=True,
+        )
+        for name, r in res.items():
+            print(f"{name:<10} {r}")
+        return 0 if all("error" not in r for r in res.values()) else 1
     if args.cmd == "status":
         for vid, v in state.data["videos"].items():
             print(f"{vid}  {v['status']:<18} {v.get('title', '')[:60]}")

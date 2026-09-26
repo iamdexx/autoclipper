@@ -139,13 +139,19 @@ published. `qa.enabled: false` turns the gate off.
 ## Publishing
 
 Everything is `dry_run: true` by default: clips render and the log shows what *would* be posted.
-Flip `publishing.dry_run: false` and set the credentials for the platforms you want:
+Flip `publishing.dry_run: false` and set the credentials for the platforms you want. Only videos
+that pass the fact-check and quality gates ever reach this step.
+
+```bash
+autoclipper auth check                  # talks to each platform, prints the account it would post as
+autoclipper publish out.mp4 --title "..." --platform youtube   # one real post, ignores dry_run
+```
 
 | Platform | Env vars | How to get |
 | --- | --- | --- |
-| YouTube Shorts | `YT_CLIENT_SECRETS` (OAuth desktop client json), `YT_TOKEN` (cache path) or `YT_TOKEN_JSON` (the token file's contents, for GitHub Actions) | Google Cloud console -> enable YouTube Data API v3 -> OAuth client (Desktop). Then `autoclipper auth youtube` once on your machine and paste `secrets/yt_token.json` into the `YT_TOKEN_JSON` repo secret. |
-| TikTok | `TIKTOK_ACCESS_TOKEN` | developers.tiktok.com app with Content Posting API, scope `video.publish`. Unaudited apps can only post privately (`TIKTOK_PRIVACY=SELF_ONLY`). |
-| Instagram Reels | `IG_ACCESS_TOKEN`, `IG_USER_ID`, `PUBLIC_BASE_URL` | Meta app with `instagram_content_publish`, IG Business/Creator account linked to a Page. Instagram pulls the file from a URL: the clip is copied to `data/public/`, which *you* have to serve at `PUBLIC_BASE_URL` (a bucket/CDN you sync that dir to, or a web server on a VPS). On GitHub Actions there is no such server, so Instagram needs external hosting. |
+| YouTube Shorts | `YT_CLIENT_SECRETS` (OAuth desktop client json), `YT_TOKEN` (cache path) or `YT_TOKEN_JSON` (the token file's contents, for GitHub Actions), `YT_PRIVACY` (`public`/`unlisted`/`private`) | Google Cloud console -> enable **YouTube Data API v3** -> OAuth client (Desktop app) -> add your Google account as a test user, or publish the app (tokens of apps left "in testing" expire after 7 days). Then `autoclipper auth youtube` once on your machine and paste `secrets/yt_token.json` into the `YT_TOKEN_JSON` repo secret. Quota: an upload costs 1600 of the 10,000 daily units, i.e. ~6 posts/day until Google raises it. |
+| TikTok | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TIKTOK_REFRESH_TOKEN`, `TIKTOK_PRIVACY` | developers.tiktok.com -> app with **Login Kit** + **Content Posting API** (direct post), scopes `user.info.basic,video.publish`, a registered redirect URI. `autoclipper auth tiktok --redirect-uri <that uri>` logs in and prints the refresh token (valid ~1 year; access tokens are minted per run). Until the app passes TikTok's audit the account may only post `SELF_ONLY` (private) - the poster reads the allowed levels from `creator_info` and downgrades with a warning. |
+| Instagram Reels | `IG_ACCESS_TOKEN`, `IG_USER_ID`, `PUBLIC_BASE_URL`, optional `PUBLIC_S3_*` | Meta app with `instagram_content_publish` + `instagram_basic`, an IG Business/Creator account linked to a Facebook Page. Use a **System User** token from Business Settings (never expires) - normal user tokens die after 60 days. Instagram pulls the file from a URL: set `PUBLIC_S3_BUCKET/ENDPOINT/KEY/SECRET` to a public S3-compatible bucket (Cloudflare R2 with a custom domain, DigitalOcean Spaces, S3) and each video is uploaded there before posting; without it the clip is copied to `data/public/` for a web server you run (not possible on GitHub Actions). |
 
 Posts and processed videos are tracked in `data/state.json` (`autoclipper status`).
 
@@ -161,7 +167,7 @@ docker run -d --restart=always --env-file .env -v $PWD/data:/app/data -v $PWD/co
 **systemd** — see `deploy/autoclipper.service`.
 
 **GitHub Actions** — `.github/workflows/clip.yml` runs `autoclipper run` every 30 min with the
-repo secrets `GEMINI_API_KEY`, `TIKTOK_ACCESS_TOKEN`, etc. and caches `data/state.json` between
+repo secrets `GEMINI_API_KEY`, `TIKTOK_REFRESH_TOKEN`, etc. and caches `data/state.json` between
 runs. Fine for a couple of creators; use a VPS for heavy volume (whisper on a 3h stream takes a
 while on CPU — set `whisper_model: tiny` there or run on a GPU box).
 
