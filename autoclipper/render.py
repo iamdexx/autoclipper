@@ -111,20 +111,35 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return header + "\n".join(lines) + "\n"
 
 
+def _has_audio(path: Path) -> bool:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
+         "-of", "csv=p=0", str(path)],
+        capture_output=True,
+        text=True,
+    )  # fmt: skip
+    return bool(out.stdout.strip())
+
+
 def render_clip(
     source: Path, moment: Moment, segments: list[Segment], cfg: Config, out: Path
 ) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     dur = moment.end - moment.start
 
-    voice = narrate.synthesize(moment.narration, cfg, out.with_suffix(".voice.m4a"))
+    voice = None
     voice_len = 0.0
     tempo = 1.0
+    if _has_audio(source):
+        voice = narrate.synthesize(moment.narration, cfg, out.with_suffix(".voice.m4a"))
     if voice:
         voice_len = narrate.duration(voice)
         if voice_len > cfg.narration.max_len_s:
             tempo = min(1.3, voice_len / cfg.narration.max_len_s)
             voice_len /= tempo
+        if voice_len > dur / 2:
+            log.warning("narration %.1fs too long for %.1fs clip, skipping", voice_len, dur)
+            voice, voice_len, tempo = None, 0.0, 1.0
 
     ass_path = out.with_suffix(".ass")
     ass_path.write_text(
