@@ -2,8 +2,9 @@ import json
 import subprocess
 from pathlib import Path
 
-from autoclipper import narrate, render, top10, trends
+from autoclipper import images, narrate, render, top10, trends
 from autoclipper.config import Config
+from autoclipper.ingest import Word
 from autoclipper.state import State
 from autoclipper.trends import Candidate, Topic
 
@@ -29,7 +30,7 @@ def _cfg(tmp_path):
 def test_config_sections_load():
     cfg = Config.load(ROOT / "config.yaml")
     assert cfg.trends.geos == ["US"]
-    assert cfg.top10.items == 10
+    assert cfg.top10.items == 6 and cfg.top10.style == "ranking"
     assert cfg.narration.elevenlabs_voice == "TX3LPaxmHKxFdv7VOQHJ"  # Liam
 
 
@@ -197,7 +198,7 @@ def _probe(path):
     return json.loads(out)["streams"]
 
 
-def test_render_narrated_and_concat(tmp_path):
+def test_render_narrated_and_concat(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
     src = _src(tmp_path)
     voice = tmp_path / "voice.m4a"
@@ -207,9 +208,14 @@ def test_render_narrated_and_concat(tmp_path):
     )  # fmt: skip
     words = narrate.even_words("this is the number ten entry", 3.0)
     parts = []
+    from autoclipper import sfx
+
+    fx = sfx.whoosh(tmp_path / "whoosh.m4a")
+    assert abs(narrate.duration(fx) - 0.6) < 0.2
     for i, badge in enumerate(["#10", "#9"]):
+        cuts = [(0.5, 2.0), (3.0, 2.0)]  # two cuts, a zoom punch on each
         out = render.render_narrated(
-            src, 1.0, 4.0, voice, words, f"ENTRY {i}", badge, cfg, tmp_path / f"{i}.mp4"
+            src, cuts, voice, words, f"ENTRY {i}", badge, cfg, tmp_path / f"{i}.mp4", sfx=fx
         )
         streams = _probe(out)
         assert [s["codec_type"] for s in streams] == ["video", "audio"]
@@ -217,13 +223,87 @@ def test_render_narrated_and_concat(tmp_path):
         assert abs(narrate.duration(out) - 4.0) < 0.3
         ass = (tmp_path / f"{i}.ass").read_text()
         assert badge in ass and f"ENTRY {i}" in ass
+        assert "\\fscx40" in ass  # badge pops in
         parts.append(out)
     # source without audio track still renders
     mute = tmp_path / "mute.mp4"
     subprocess.check_call(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-an", str(mute)])
     parts.append(
-        render.render_narrated(mute, 0.0, 2.0, None, [], "MUTE", "#8", cfg, tmp_path / "m.mp4")
+        render.render_narrated(mute, [(0.0, 2.0)], None, [], "MUTE", "#8", cfg, tmp_path / "m.mp4")
     )
     final = render.concat(parts, tmp_path / "final.mp4")
     assert abs(narrate.duration(final) - 10.0) < 0.5
     assert [s["codec_type"] for s in _probe(final)] == ["video", "audio"]
+    # one continuous music bed under the whole thing, video stream untouched
+    cfg.top10.music = "synth"
+    bed = sfx.music_bed(narrate.duration(final), cfg, tmp_path / "bed.m4a")
+    assert bed and abs(narrate.duration(bed) - narrate.duration(final)) < 0.2
+    mixed = sfx.mix_under(final, bed, -14.0, tmp_path / "mixed.mp4")
+    assert abs(narrate.duration(mixed) - narrate.duration(final)) < 0.3
+    assert [s["codec_type"] for s in _probe(mixed)] == ["video", "audio"]
+    cfg.top10.music = "off"
+    assert sfx.music_bed(5.0, cfg, tmp_path / "none.m4a") is None
+    # generated music: falls back to music_dir, then to nothing (never to the synth)
+    cfg.top10.music = "elevenlabs"
+    monkeypatch.setattr(sfx, "generate_music", lambda *a: None)
+    assert sfx.music_bed(5.0, cfg, tmp_path / "none2.m4a") is None
+    cfg.top10.music_dir = str(tmp_path / "tracks")
+    (tmp_path / "tracks").mkdir()
+    (tmp_path / "tracks" / "song.m4a").write_bytes(voice.read_bytes())
+    own = sfx.music_bed(5.0, cfg, tmp_path / "own.m4a")
+    assert own and abs(narrate.duration(own) - 5.0) < 0.2
+
+
+def test_cut_plan():
+    # two 2s windows spread over 13s of footage: one at the start, one at the end
+    assert render.cut_plan(13.0, 4.0, 2) == [(0.0, 2.0), (11.0, 2.0)]
+    assert render.cut_plan(13.0, 6.0, 3) == [(0.0, 2.0), (5.5, 2.0), (11.0, 2.0)]
+    # not enough footage to spread: one window, never past the end
+    assert render.cut_plan(3.0, 4.0, 2) == [(0.0, 3.0)]
+    assert render.cut_plan(13.0, 4.0, 1) == [(0.0, 4.0)]
+    assert render.cut_plan(0.0, 4.0, 2) == [(0.0, 4.0)]
+    assert "zoompan" in render._vf(Path("x.ass"), "[src]", [0.0, 2.0])
+    assert "zoompan" not in render._vf(Path("x.ass"))
+
+
+def test_ranking_script_parsing_and_prompt(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.top10.items, cfg.top10.style = 2, "ranking"
+    j = {
+        "title": "Ranking Insane Moments",
+        "tease": "last one is wild",
+        "hashtags": ["#x"],
+        "entries": [
+            {"rank": 2, "name": "two", "label": "Smooth", "line": "l2", "query": "q2"},
+            {"rank": 1, "name": "one", "label": "Hell nah", "line": "l1", "query": "q1"},
+        ],
+    }
+    seen = {}
+    monkeypatch.setattr(trends, "_llm", lambda p, c: seen.setdefault("prompt", p) and json.dumps(j))
+    s = top10.write_script("things", "", cfg)
+    assert "Ranking" in seen["prompt"] and "label" in seen["prompt"]
+    assert s.tease == "last one is wild" and s.intro == ""
+    assert [e.label for e in s.entries] == ["Smooth", "Hell nah"]
+
+
+def test_ranking_events_fill_from_the_bottom():
+    labels = [(1, "Best"), (2, "Ouch"), (3, "Smooth")]
+    ev = render.ranking_events("Ranking The Best Moments", "wait for it", labels, 2, 5.0)
+    banner, rows = ev
+    assert "Ranking" in banner and "WAIT FOR IT" in banner
+    assert "Smooth" in rows and "Ouch" in rows and "Best" not in rows
+    assert rows.count("\\N") >= 2
+
+
+def test_one_word_captions(tmp_path):
+    cfg = _cfg(tmp_path)
+    words = [Word(0.0, 0.4, "Bro"), Word(0.5, 0.9, "took"), Word(1.0, 1.4, "the bait!")]
+    ass = render.build_ass(words, "", 2.0, cfg, one_word=True)
+    lines = [ln for ln in ass.splitlines() if ln.startswith("Dialogue")]
+    assert len(lines) == 3 and all(",Word," in ln for ln in lines)
+    assert lines[-1].endswith("THE BAIT")
+
+
+def test_image_matching():
+    assert images.matches("Justin Tucker field goal", "File:Justin Tucker kicks a field goal.jpg")
+    assert not images.matches("Justin Tucker field goal", "File:Sunset over the bay.jpg")

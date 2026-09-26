@@ -24,6 +24,14 @@ from .ingest import Word
 
 log = logging.getLogger(__name__)
 
+# lower stability + higher style = more expressive, "hyped" delivery (still Liam)
+_VOICE_SETTINGS = {
+    "stability": 0.3,
+    "similarity_boost": 0.8,
+    "style": 0.6,
+    "use_speaker_boost": True,
+}
+
 GEMINI_TTS_MODEL = "gemini-3.8-flash-tts"
 
 
@@ -106,7 +114,7 @@ def tts_elevenlabs(text: str, voice: str, out: Path) -> Path:
         json={
             "text": text,
             "model_id": os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2"),
-            "voice_settings": {"stability": 0.45, "similarity_boost": 0.8, "style": 0.35},
+            "voice_settings": _VOICE_SETTINGS,
         },
         timeout=120,
     )
@@ -132,7 +140,7 @@ def tts_elevenlabs_timed(text: str, voice: str, out: Path) -> tuple[Path, list[W
         json={
             "text": text,
             "model_id": os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2"),
-            "voice_settings": {"stability": 0.45, "similarity_boost": 0.8, "style": 0.35},
+            "voice_settings": _VOICE_SETTINGS,
         },
         timeout=120,
     )

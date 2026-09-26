@@ -72,13 +72,34 @@ would be picked; add `--clip` to actually make the clips.
 ## Top 10 videos
 
 `autoclipper top10 "craziest NFL plays this week"` (or no topic: picked from trends /
-`top10.topics`) makes one vertical countdown video:
+`top10.topics`) makes one vertical ranked video in one of three styles (`top10.style`):
 
-- LLM writes title, hook intro, 10 ranked entries with a spoken line + footage query each
-- per entry: yt-dlp grabs a short section of the top YouTube result, ffmpeg reframes to 9:16
-- narrator (ElevenLabs word timestamps -> synced karaoke captions) voices every line, source
-  audio ducked under it, big `#10 ... #1` badge + entry title on screen
-- segments are concatenated into one MP4 in `data/top10/<slug>/`
+- **`ranking`** (default) - the "Ranking The Most Insane X Moments" meme format, ~20-30s:
+  `top10.items` (default 6) real clips back to back with their **own audio**, a colour-per-word
+  title banner + small tease line on top, a `1..N` list down the left that fills in with a 1-3
+  word label as each clip plays (N first, 1 last), the clip's own speech captioned one word at
+  a time. No narrator unless `top10.narrate: true` (then Liam says the entry's one-liner and the
+  clip audio ducks under him).
+- **`countdown`** - "Top 10 ...": narrator (ElevenLabs word timestamps -> synced karaoke
+  captions) voices every line and a cold-open intro, source audio ducked (`top10.source_db`),
+  big `#10 ... #1` badge (pops in) + entry title on screen; `top10.cuts_per_entry` cuts per
+  entry (use 2 here), each with a zoom punch.
+- **`listicle`** - "N photos ...": one still per item (Wikimedia Commons, YouTube thumbnail
+  fallback) with a slow zoom over a blurred fill, one word on screen at a time, narrator reads
+  straight through (`top10.listicle_gap_s` between items), no clip audio.
+
+Common to all:
+
+- LLM writes title, ranked entries (spoken line, list label, footage/image query) - every
+  claim goes through the fact-check gate below before anything is fetched or rendered
+- footage: yt-dlp grabs a short section of the top YouTube result, ffmpeg reframes to 9:16
+  (blurred fill); a whoosh/hit on every rank reveal (`top10.sfx`)
+- segments are concatenated into one MP4 in `data/top10/<slug>/`, then one continuous music
+  bed runs under the whole video start to finish (level `top10.music_db`). `top10.music:
+  elevenlabs` (default) generates an instrumental per video with the ElevenLabs Music API
+  (`top10.music_prompt`; your key needs the `music_generation` permission; cached in
+  `data/assets/music/`). `top10.music_dir` = folder of your own tracks (random pick, looped/cut,
+  faded; also the fallback if generation fails). `synth` = built-in ffmpeg pulse, `off` = none.
 
 ## Fact-check gate (`verify:`)
 
