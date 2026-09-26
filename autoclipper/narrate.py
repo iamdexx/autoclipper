@@ -20,6 +20,7 @@ from pathlib import Path
 import requests
 
 from .config import Config
+from .ingest import Word
 
 log = logging.getLogger(__name__)
 
@@ -112,11 +113,83 @@ def tts_elevenlabs(text: str, voice: str, out: Path) -> Path:
     r.raise_for_status()
     mp3 = out.with_suffix(".mp3")
     mp3.write_bytes(r.content)
+    return _mp3_to_aac(mp3, out)
+
+
+def _mp3_to_aac(mp3: Path, out: Path) -> Path:
     subprocess.check_call(
         ["ffmpeg", "-y", "-loglevel", "error", "-i", str(mp3), "-c:a", "aac", str(out)]
     )
     mp3.unlink()
     return out
+
+
+def tts_elevenlabs_timed(text: str, voice: str, out: Path) -> tuple[Path, list[Word]]:
+    """Like tts_elevenlabs but also returns per-word timings (for captions on narrated videos)."""
+    r = requests.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{voice}/with-timestamps",
+        headers={"xi-api-key": _elevenlabs_key()},
+        json={
+            "text": text,
+            "model_id": os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2"),
+            "voice_settings": {"stability": 0.45, "similarity_boost": 0.8, "style": 0.35},
+        },
+        timeout=120,
+    )
+    r.raise_for_status()
+    j = r.json()
+    mp3 = out.with_suffix(".mp3")
+    mp3.write_bytes(base64.b64decode(j["audio_base64"]))
+    _mp3_to_aac(mp3, out)
+    al = j["alignment"]
+    words: list[Word] = []
+    cur = ""
+    ws = prev_end = 0.0
+    for ch, s, e in zip(
+        al["characters"],
+        al["character_start_times_seconds"],
+        al["character_end_times_seconds"],
+        strict=False,
+    ):
+        if ch.isspace():
+            if cur:
+                words.append(Word(ws, prev_end, cur))
+                cur = ""
+            continue
+        if not cur:
+            ws = s
+        cur += ch
+        prev_end = e
+    if cur:
+        words.append(Word(ws, prev_end, cur))
+    return out, words
+
+
+def even_words(text: str, dur: float) -> list[Word]:
+    """Fallback word timing when the TTS provider gives none: spread words evenly."""
+    toks = text.split()
+    if not toks:
+        return []
+    step = dur / len(toks)
+    return [Word(i * step, (i + 1) * step, t) for i, t in enumerate(toks)]
+
+
+def synthesize_timed(text: str, cfg: Config, out: Path) -> tuple[Path, list[Word]] | None:
+    """Narration plus word timings; exact from ElevenLabs, estimated for other providers."""
+    provider = pick_provider(cfg)
+    if not provider or not text.strip():
+        return None
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if provider == "elevenlabs":
+        try:
+            return tts_elevenlabs_timed(text, cfg.narration.elevenlabs_voice, out)
+        except Exception as e:
+            log.warning("elevenlabs timed narration failed: %s", e)
+            return None
+    voice = synthesize(text, cfg, out)
+    if not voice:
+        return None
+    return voice, even_words(text, duration(voice))
 
 
 def tts_openai(text: str, voice: str, out: Path) -> Path:
