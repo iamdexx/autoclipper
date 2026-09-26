@@ -48,8 +48,10 @@ def pick_provider(cfg: Config) -> str | None:
     return None
 
 
-def tts_gemini(text: str, voice: str, style: str, out: Path) -> Path:
-    prompt = f"{style}: {text}" if style else text
+def tts_gemini(text: str, voice: str, out: Path) -> Path:
+    # Gemini TTS reads any style/stage direction aloud, so only the hook itself is sent;
+    # delivery comes from the voice choice and how the LLM phrases the line.
+    prompt = text
     r = requests.post(
         f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TTS_MODEL}:generateContent",
         headers={"x-goog-api-key": _gemini_key()},
@@ -130,7 +132,7 @@ def synthesize(text: str, cfg: Config, out: Path) -> Path | None:
         if provider == "elevenlabs":
             return tts_elevenlabs(text, n.elevenlabs_voice, out)
         if provider == "gemini":
-            return tts_gemini(text, n.gemini_voice, n.style, out)
+            return tts_gemini(text, n.gemini_voice, out)
         if provider == "openai":
             return tts_openai(text, n.openai_voice, out)
     except Exception as e:
