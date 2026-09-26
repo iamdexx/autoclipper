@@ -42,7 +42,7 @@ class CaptionStyle:
 class Narration:
     provider: str = "auto"  # auto | elevenlabs | gemini | openai | off
     gemini_voice: str = "Puck"
-    elevenlabs_voice: str = "pNInz6obpgDQGcFmaJgB"  # "Adam"
+    elevenlabs_voice: str = "TX3LPaxmHKxFdv7VOQHJ"  # "Liam"
     openai_voice: str = "onyx"
     duck_db: float = -14.0  # how far the stream audio drops under the narrator
     max_len_s: float = 6.0
