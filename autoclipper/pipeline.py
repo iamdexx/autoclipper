@@ -6,7 +6,7 @@ import re
 from dataclasses import asdict
 from pathlib import Path
 
-from . import ingest, publish, rank, render, top10, trends
+from . import ingest, publish, rank, render, top10, trends, verify
 from .config import Config, Creator
 from .state import State
 
@@ -36,6 +36,8 @@ def process_video(
     src = ingest.download(meta.url, vdir)
     segments = ingest.transcribe(src, cfg, vdir / "transcript.json")
     moments = rank.rank(segments, cfg, creator.name)
+    if cfg.verify.enabled and cfg.verify.check_hooks:
+        check_hooks(moments, segments, cfg, vdir / "factcheck.json")
     (vdir / "moments.json").write_text(json.dumps([asdict(m) for m in moments], indent=2))
     log.info("%s: %d moments picked", meta.id, len(moments))
 
@@ -57,6 +59,20 @@ def process_video(
         meta.id, "done", title=meta.title, creator=creator.name, clips=[c.name for c in clips]
     )
     return clips
+
+
+def check_hooks(moments, segments, cfg: Config, report: Path) -> None:
+    """Narrator hooks must be faithful to the clip: unsupported ones are replaced with the
+    checker's faithful rewrite, or dropped (clip keeps the creator's own audio) if none."""
+    rows = []
+    for m in moments:
+        text = " ".join(s.text for s in segments if s.end > m.start and s.start < m.end)
+        chk, fixed = verify.check_hook(m.narration or m.hook, text, cfg)
+        rows.append({**verify.dump([chk])[0], "fixed": fixed})
+        if chk.verdict == "unsupported":
+            log.warning("hook rejected (%s): %r -> %r", chk.note, m.narration, fixed)
+            m.narration = fixed
+    report.write_text(json.dumps(rows, indent=2))
 
 
 def run_creators(cfg: Config, state: State) -> int:

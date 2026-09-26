@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
+from pathlib import Path
 
-from . import publish, top10, trends
+from . import publish, top10, trends, verify
 from .config import Config, Creator
 from .pipeline import make_top10, process_video, run_once, run_trends
 from .state import State
@@ -34,6 +36,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     tt.add_argument("--angle", default="", help="extra context for the script")
     tt.add_argument("--publish", action="store_true")
+
+    fc = sub.add_parser("factcheck", help="fact-check a Top-10 script.json or a free-text claim")
+    fc.add_argument("target", help="path to data/top10/<slug>/script.json, or a claim in quotes")
+    fc.add_argument("--query", default="", help="search query for a free-text claim")
 
     sub.add_parser("run", help="one pass: creators + trends + top10 (whatever is enabled)")
     sub.add_parser("watch", help="loop `run` forever every poll_interval_s")
@@ -86,6 +92,34 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(out)
         return 0
+    if args.cmd == "factcheck":
+        p = Path(args.target)
+        if p.is_file():
+            j = json.loads(p.read_text())
+            script = top10.Script(
+                topic=j["topic"],
+                title=j["title"],
+                intro=j.get("intro", ""),
+                entries=[
+                    top10.Entry(e["rank"], e["name"], e["line"], e["query"]) for e in j["entries"]
+                ],
+            )
+            checks = top10.fact_check(script, cfg)
+            labels = [f"#{e.rank} {e.name}" for e in script.entries]
+            (p.parent / "factcheck.json").write_text(json.dumps(verify.dump(checks), indent=2))
+        else:
+            checks = verify.check_claims([(args.target, args.query or args.target)], cfg)
+            labels = ["claim"]
+        bad = 0
+        for label, c in zip(labels, checks, strict=True):
+            ok = verify.passes(c, cfg)
+            bad += not ok
+            print(f"{'PASS' if ok else 'FAIL'} {c.verdict:<13} {c.confidence:.2f}  {label}")
+            print(f"     {c.note}")
+            for ev in c.evidence[:3]:
+                print(f"     - [{ev.kind}] {ev.title[:90]}  {ev.url}")
+        print(f"\n{len(checks) - bad}/{len(checks)} passed")
+        return 1 if bad else 0
     if args.cmd == "run":
         run_once(cfg, state)
         return 0
