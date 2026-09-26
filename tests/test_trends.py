@@ -312,6 +312,15 @@ def test_one_word_caption_clears_during_a_long_pause(tmp_path):
     assert lines[0].split(",")[2] == "0:00:01.00"  # 0.4 + 0.6 hold, not 3.0
 
 
+def test_one_word_captions_never_overlap(tmp_path):
+    cfg = _cfg(tmp_path)
+    words = [Word(0.0, 0.1, "you"), Word(0.15, 0.3, "hear"), Word(0.35, 0.6, "how")]
+    lines = [ln for ln in render.build_ass(words, "", 2.0, cfg).splitlines() if ln.startswith("D")]
+    ends = [ln.split(",")[2] for ln in lines]
+    starts = [ln.split(",")[1] for ln in lines]
+    assert ends[:-1] == starts[1:]  # each word leaves the moment the next arrives, no stacking
+
+
 def test_caption_style_is_one_setting_for_every_format(tmp_path):
     cfg = _cfg(tmp_path)
     words = [Word(0.0, 0.4, "Bro"), Word(0.5, 0.9, "took"), Word(1.0, 1.4, "the bait!")]

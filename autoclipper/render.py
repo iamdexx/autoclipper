@@ -120,8 +120,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     if one_word:
         for k, w in enumerate(words):
             # hold until the next word, but never through a long pause
-            nxt = words[k + 1].start if k + 1 < len(words) else w.end
-            we = max(w.start + 0.3, min(nxt, w.end + 0.6))
+            nxt = words[k + 1].start if k + 1 < len(words) else w.end + 0.6
+            we = min(nxt, max(w.start + 0.3, w.end + 0.6))  # never overlaps the next word
             if we > w.start:
                 txt = _esc(w.text.strip(".,!?;:").upper())
                 lines.append(f"Dialogue: 0,{_ts(w.start)},{_ts(we)},Word,,0,0,0,,{txt}")
