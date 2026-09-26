@@ -82,12 +82,15 @@ def build_ass(
     cfg: Config,
     hook_secs: float = 4.0,
     badge: str = "",
-    one_word: bool = False,
+    one_word: bool | None = None,
     events: list[str] | None = None,
 ) -> str:
-    """`one_word`: listicle style - every word is its own big caption, no highlight colouring.
+    """`one_word`: every word is its own big caption, no highlight colouring (defaults to
+    captions.style == "word" so every format looks the same).
     `events`: extra pre-built Dialogue lines (e.g. the ranking overlay)."""
     c = cfg.captions
+    if one_word is None:
+        one_word = c.style == "word"
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {W}
@@ -204,7 +207,7 @@ def render_narrated(
     sfx: Path | None = None,
     duck_db: float | None = None,
     events: list[str] | None = None,
-    one_word: bool = False,
+    one_word: bool | None = None,
 ) -> Path:
     """A segment fully voiced by the narrator (Top-10 entries): source audio stays ducked the
     whole time, captions come from the narration's word timings, badge = big rank number.

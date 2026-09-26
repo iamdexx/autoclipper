@@ -305,6 +305,20 @@ def test_one_word_captions(tmp_path):
     assert lines[-1].endswith("THE BAIT")
 
 
+def test_caption_style_is_one_setting_for_every_format(tmp_path):
+    cfg = _cfg(tmp_path)
+    words = [Word(0.0, 0.4, "Bro"), Word(0.5, 0.9, "took"), Word(1.0, 1.4, "the bait!")]
+
+    def dialogue(ass: str) -> str:
+        return "\n".join(ln for ln in ass.splitlines() if ln.startswith("Dialogue"))
+
+    default = dialogue(render.build_ass(words, "", 2.0, cfg))  # what every format gets
+    assert cfg.captions.style == "word"
+    assert cfg.captions.highlight_color not in default and ",Cap," not in default
+    cfg.captions.style = "highlight"
+    assert cfg.captions.highlight_color in dialogue(render.build_ass(words, "", 2.0, cfg))
+
+
 def test_image_matching():
     assert images.matches("Justin Tucker field goal", "File:Justin Tucker kicks a field goal.jpg")
     assert not images.matches("Justin Tucker field goal", "File:Sunset over the bay.jpg")

@@ -145,7 +145,10 @@ def check(video: Path, cfg: Config, expect_speech: str = "", kind: str = "clip")
 
     if expect_speech.strip() and q.check_speech:
         try:
-            segs = ingest.transcribe(video, cfg, video.with_suffix(".qa-transcript.json"))
+            cache = video.with_suffix(".qa-transcript.json")
+            if cache.exists() and cache.stat().st_mtime < video.stat().st_mtime:
+                cache.unlink()  # transcript of a previous render under the same name
+            segs = ingest.transcribe(video, cfg, cache)
             heard = " ".join(s.text for s in segs)
             score = script_match(expect_speech, heard)
             rep.add(

@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -287,6 +288,24 @@ def test_qa_gate_passes_a_sane_video_and_writes_report(tmp_path, monkeypatch):
     assert qa.gate(vid, cfg, "Miami Miracle lateral", kind="top10")
     rep = json.loads((tmp_path / "ok.qa.json").read_text())
     assert rep["ok"] and {c["name"] for c in rep["checks"]} >= {"aspect", "loudness", "speech"}
+
+
+def test_qa_drops_transcript_cached_from_an_older_render(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.qa.top10_min_s = 3
+    seen: list[bool] = []
+
+    def fake(v, c, cache):
+        seen.append(cache.exists())
+        return [Segment(0, 1, "miami miracle", [])]
+
+    monkeypatch.setattr(qa.ingest, "transcribe", fake)
+    vid = _synthetic(tmp_path, "re.mp4", 5)
+    stale = vid.with_suffix(".qa-transcript.json")
+    stale.write_text("[]")
+    os.utime(stale, (0, 0))  # older than the video -> must be ignored
+    qa.check(vid, cfg, "Miami Miracle", kind="top10")
+    assert seen == [False]
 
 
 def test_qa_gate_rejects_silence_black_and_wrong_narration(tmp_path, monkeypatch):

@@ -424,7 +424,7 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
         if not badge:
             cuts = cuts[::-1]
         events = None
-        one_word = False
+        one_word: bool | None = None
         duck = t.source_db
         if ranking:
             # banner + running list instead of a badge (the intro shows the list still empty),
