@@ -91,11 +91,12 @@ class TopTen:
     per_run: int = 1  # how many Top-10 videos to make per run
     # ranking  = "Ranking The Most ... Moments": ~6 clips back to back with their own audio, a
     #            colour title banner + tease, a 1..N list on the left that fills in per clip,
-    #            the clip's speech captioned one word at a time (no narrator unless `narrate`)
+    #            narrator hook + one line per clip (or, with narrate off, the clip's own speech
+    #            captioned one word at a time and its audio left alone)
     # countdown = "Top 10 ...": big rank badge per entry, narrator over ducked footage
     # listicle  = "N photos ...": one still per item with a slow zoom, narrator reads through
     style: str = "ranking"
-    narrate: bool = False  # ranking style: also voice a one-liner per clip
+    narrate: bool = True  # ranking style: full narration (hook + a line per clip)
     items: int = 6
     item_min_s: float = 3.5  # each entry lasts at least this (longer if the narration is)
     listicle_gap_s: float = 0.25  # listicle: pause between items

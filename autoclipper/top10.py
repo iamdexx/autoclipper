@@ -85,17 +85,22 @@ RANKING_PROMPT = """Write a viral "Ranking ..." short (TikTok / Reels / Shorts) 
 Context: {angle}
 Format: {n} real clips shown back to back, ranked {n} (shown first) to 1 (best, shown last). A
 title banner stays on screen ("Ranking The Most Insane <X> Moments") with a small tease under it,
-and a 1-{n} list on the left fills in with a 1-3 word label as each clip plays. The clips' own
-audio is the content, so every entry must be a specific moment findable as a YouTube video.
+and a 1-{n} list on the left fills in with a 1-3 word label as each clip plays. A hyped,
+fast-talking narrator voices a cold-open hook and one line per clip over the footage, so every
+entry must be a specific moment findable as a YouTube video.
 Only REAL, well-documented moments - nothing invented; if unsure about a detail leave it out.
 {avoid}
+Narration is plain spoken words only: no emojis, hashtags, stage directions or rank numbers
+inside the sentences (the video shows the number). Every line leads with the most shocking
+concrete detail and the last one or two tease toward number one.
 Return ONLY JSON:
 {{"title": "<Ranking ... - starts with 'Ranking', max 6 words>",
   "tease": "<max 7 words, e.g. 'the last one broke the internet'>",
+  "intro": "<1 sentence cold-open hook, max 12 words>",
   "hashtags": ["#a", "#b", "#c", "#d"],
   "entries": [{{"rank": {n}, "name": "<moment, max 5 words>",
                 "label": "<1-3 word list tag, punchy, e.g. 'Skilled', 'Hell nah', 'Smooth'>",
-                "line": "<what happens, 1 sentence under 12 words, plain spoken words>",
+                "line": "<1 sentence, 10-16 words, specific and punchy>",
                 "query": "<YouTube search that finds footage of exactly this>"}}, ...]}}
 """
 
@@ -392,7 +397,7 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
 
     # intro + entries share one loop; the intro rides on the first entry's footage
     segments: list[tuple[str, str, str, Entry]] = []
-    if script.intro and not ranking:
+    if script.intro and (not ranking or t.narrate):
         segments.append((script.intro, script.title, "", script.entries[0]))
     for e in script.entries:
         segments.append((e.line, e.name, f"#{e.rank}", e))
@@ -421,12 +426,14 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
         one_word = False
         duck = t.source_db
         if ranking:
-            # the clip is the content: banner + running list instead of a badge, the clip's
-            # own speech captioned one word at a time, its audio left (nearly) alone
-            title, badge = "", ""
-            events = render.ranking_events(script.title, script.tease, labels, entry.rank, dur)
+            # banner + running list instead of a badge (the intro shows the list still empty),
+            # one big word at a time; without a narrator the clip's own speech is what gets
+            # captioned and its audio is left alone
+            revealed = entry.rank if badge else entry.rank + 1
+            title, badge, one_word = "", "", True
+            events = render.ranking_events(script.title, script.tease, labels, revealed, dur)
             if not voice:
-                words, one_word, duck = _clip_words(src, cuts, cfg), True, 0.0
+                words, duck = _clip_words(src, cuts, cfg), 0.0
         render.render_narrated(
             src,
             cuts,

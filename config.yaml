@@ -52,7 +52,7 @@ top10:
   per_run: 1
   style: ranking        # ranking (clips + title banner + filling 1..N list, clip audio) |
                         # countdown (Top 10 with rank badges + narrator) | listicle (photos + narrator)
-  narrate: false        # ranking: also have Liam say a one-liner per clip
+  narrate: true         # ranking: Liam voices a hook + one line per clip (false = clip audio only)
   items: 6              # ranking ~6 (20-30s video); countdown 10
   item_min_s: 3.5
   cuts_per_entry: 1     # footage cuts per entry, each with a zoom punch (2 suits countdown)

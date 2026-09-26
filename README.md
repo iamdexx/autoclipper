@@ -77,9 +77,10 @@ would be picked; add `--clip` to actually make the clips.
 - **`ranking`** (default) - the "Ranking The Most Insane X Moments" meme format, ~20-30s:
   `top10.items` (default 6) real clips back to back with their **own audio**, a colour-per-word
   title banner + small tease line on top, a `1..N` list down the left that fills in with a 1-3
-  word label as each clip plays (N first, 1 last), the clip's own speech captioned one word at
-  a time. No narrator unless `top10.narrate: true` (then Liam says the entry's one-liner and the
-  clip audio ducks under him).
+  word label as each clip plays (N first, 1 last), one big word on screen at a time. Liam voices
+  a cold-open hook plus one line per clip with the clip audio ducked under him
+  (`top10.source_db`); `top10.narrate: false` drops the narrator and captions the clip's own
+  speech instead, audio left alone.
 - **`countdown`** - "Top 10 ...": narrator (ElevenLabs word timestamps -> synced karaoke
   captions) voices every line and a cold-open intro, source audio ducked (`top10.source_db`),
   big `#10 ... #1` badge (pops in) + entry title on screen; `top10.cuts_per_entry` cuts per
