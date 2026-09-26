@@ -25,10 +25,18 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY || secrets.elevenlabskey }}
-          TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
+          TIKTOK_CLIENT_KEY: ${{ secrets.TIKTOK_CLIENT_KEY }}
+          TIKTOK_CLIENT_SECRET: ${{ secrets.TIKTOK_CLIENT_SECRET }}
+          TIKTOK_REFRESH_TOKEN: ${{ secrets.TIKTOK_REFRESH_TOKEN }}
+          TIKTOK_PRIVACY: ${{ vars.TIKTOK_PRIVACY || 'PUBLIC_TO_EVERYONE' }}
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
           PUBLIC_BASE_URL: ${{ secrets.PUBLIC_BASE_URL }}
+          PUBLIC_S3_BUCKET: ${{ secrets.PUBLIC_S3_BUCKET }}
+          PUBLIC_S3_ENDPOINT: ${{ secrets.PUBLIC_S3_ENDPOINT }}
+          PUBLIC_S3_KEY: ${{ secrets.PUBLIC_S3_KEY }}
+          PUBLIC_S3_SECRET: ${{ secrets.PUBLIC_S3_SECRET }}
+          YT_PRIVACY: ${{ vars.YT_PRIVACY || 'public' }}
           YT_TOKEN_JSON: ${{ secrets.YT_TOKEN_JSON }}
       - name: save state
         if: always()

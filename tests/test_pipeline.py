@@ -207,6 +207,60 @@ def test_publish_top10_templates(tmp_path):
     assert "clip from" not in res["youtube"]["caption"]
 
 
+def test_publish_only_and_force(tmp_path, monkeypatch):
+    from autoclipper import publish
+
+    cfg = _cfg(tmp_path)
+    cfg.publishing.dry_run = True
+    cfg.publishing.youtube = cfg.publishing.tiktok = True
+    monkeypatch.setattr(publish, "publish_tiktok", lambda v, c: {"id": "x", "status": "ok"})
+    res = publish.publish_all(tmp_path / "v.mp4", "h", "c", [], cfg, only="tiktok", force=True)
+    assert res == {"tiktok": {"id": "x", "status": "ok"}}
+
+
+def test_tiktok_privacy_downgrades_to_allowed(monkeypatch):
+    from autoclipper import publish
+
+    monkeypatch.setenv("TIKTOK_PRIVACY", "PUBLIC_TO_EVERYONE")
+    assert publish.tiktok_privacy({"privacy_level_options": ["SELF_ONLY"]}) == "SELF_ONLY"
+    assert (
+        publish.tiktok_privacy({"privacy_level_options": ["SELF_ONLY", "PUBLIC_TO_EVERYONE"]})
+        == "PUBLIC_TO_EVERYONE"
+    )
+
+
+def test_tiktok_token_refreshes(monkeypatch):
+    from autoclipper import publish
+
+    for k in ("TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET", "TIKTOK_REFRESH_TOKEN"):
+        monkeypatch.setenv(k, "x")
+    seen = {}
+
+    class R:
+        def json(self):
+            return {"access_token": "fresh"}
+
+    def post(url, data, timeout):
+        seen.update(data)
+        return R()
+
+    monkeypatch.setattr(publish.requests, "post", post)
+    assert publish.tiktok_token() == "fresh"
+    assert seen["grant_type"] == "refresh_token"
+
+
+def test_host_public_copies_without_bucket(tmp_path, monkeypatch):
+    from autoclipper import publish
+
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://cdn.example.com/")
+    monkeypatch.delenv("PUBLIC_S3_BUCKET", raising=False)
+    v = tmp_path / "a.mp4"
+    v.write_bytes(b"x")
+    url = publish.host_public(v, tmp_path / "public")
+    assert url == "https://cdn.example.com/a.mp4"
+    assert (tmp_path / "public" / "a.mp4").exists()
+
+
 def _synthetic(tmp_path, name, dur, audio="anoisesrc=color=pink:amplitude=0.3", video="testsrc2="):
     out = tmp_path / name
     subprocess.check_call(
