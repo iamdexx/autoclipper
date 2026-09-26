@@ -77,8 +77,13 @@ would be picked; add `--clip` to actually make the clips.
 - LLM writes title, hook intro, 10 ranked entries with a spoken line + footage query each
 - per entry: yt-dlp grabs a short section of the top YouTube result, ffmpeg reframes to 9:16
 - narrator (ElevenLabs word timestamps -> synced karaoke captions) voices every line, source
-  audio ducked under it, big `#10 ... #1` badge + entry title on screen
-- segments are concatenated into one MP4 in `data/top10/<slug>/`
+  audio ducked under it, big `#10 ... #1` badge (pops in) + entry title on screen
+- pacing: `top10.cuts_per_entry` (default 2) footage cuts per entry, each with a zoom punch,
+  and a whoosh/hit on every rank reveal (`top10.sfx`)
+- segments are concatenated into one MP4 in `data/top10/<slug>/`, then one continuous music
+  bed runs under the whole video start to finish (`top10.music`, level `top10.music_db`).
+  Default is a minimal synthesised pulse; point `top10.music_dir` at a folder of your own
+  royalty-free tracks and one is picked at random, looped/cut to length and faded out.
 
 ## Fact-check gate (`verify:`)
 

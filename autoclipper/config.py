@@ -94,6 +94,11 @@ class TopTen:
     item_max_s: float = 10.0  # how much footage to fetch per entry
     source_max_duration_s: int = 30 * 60  # only clip from sources up to this long
     topics: list[str] = field(default_factory=list)  # fixed ideas; empty = derive from trends
+    cuts_per_entry: int = 2  # footage cuts per entry (each with a zoom punch)
+    sfx: bool = True  # whoosh/hit on every rank reveal
+    music: bool = True  # one continuous bed under the whole video, start to end
+    music_dir: str = ""  # your own tracks (mp3/m4a/wav); empty = built-in synth pulse
+    music_db: float = -14.0  # bed level relative to the narration
 
 
 @dataclass

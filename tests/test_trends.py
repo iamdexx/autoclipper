@@ -207,9 +207,14 @@ def test_render_narrated_and_concat(tmp_path):
     )  # fmt: skip
     words = narrate.even_words("this is the number ten entry", 3.0)
     parts = []
+    from autoclipper import sfx
+
+    fx = sfx.whoosh(tmp_path / "whoosh.m4a")
+    assert abs(narrate.duration(fx) - 0.6) < 0.2
     for i, badge in enumerate(["#10", "#9"]):
+        cuts = [(0.5, 2.0), (3.0, 2.0)]  # two cuts, a zoom punch on each
         out = render.render_narrated(
-            src, 1.0, 4.0, voice, words, f"ENTRY {i}", badge, cfg, tmp_path / f"{i}.mp4"
+            src, cuts, voice, words, f"ENTRY {i}", badge, cfg, tmp_path / f"{i}.mp4", sfx=fx
         )
         streams = _probe(out)
         assert [s["codec_type"] for s in streams] == ["video", "audio"]
@@ -217,13 +222,34 @@ def test_render_narrated_and_concat(tmp_path):
         assert abs(narrate.duration(out) - 4.0) < 0.3
         ass = (tmp_path / f"{i}.ass").read_text()
         assert badge in ass and f"ENTRY {i}" in ass
+        assert "\\fscx40" in ass  # badge pops in
         parts.append(out)
     # source without audio track still renders
     mute = tmp_path / "mute.mp4"
     subprocess.check_call(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-an", str(mute)])
     parts.append(
-        render.render_narrated(mute, 0.0, 2.0, None, [], "MUTE", "#8", cfg, tmp_path / "m.mp4")
+        render.render_narrated(mute, [(0.0, 2.0)], None, [], "MUTE", "#8", cfg, tmp_path / "m.mp4")
     )
     final = render.concat(parts, tmp_path / "final.mp4")
     assert abs(narrate.duration(final) - 10.0) < 0.5
     assert [s["codec_type"] for s in _probe(final)] == ["video", "audio"]
+    # one continuous music bed under the whole thing, video stream untouched
+    bed = sfx.music_bed(narrate.duration(final), cfg, tmp_path / "bed.m4a")
+    assert bed and abs(narrate.duration(bed) - narrate.duration(final)) < 0.2
+    mixed = sfx.mix_under(final, bed, -14.0, tmp_path / "mixed.mp4")
+    assert abs(narrate.duration(mixed) - narrate.duration(final)) < 0.3
+    assert [s["codec_type"] for s in _probe(mixed)] == ["video", "audio"]
+    cfg.top10.music = False
+    assert sfx.music_bed(5.0, cfg, tmp_path / "none.m4a") is None
+
+
+def test_cut_plan():
+    # two 2s windows spread over 13s of footage: one at the start, one at the end
+    assert render.cut_plan(13.0, 4.0, 2) == [(0.0, 2.0), (11.0, 2.0)]
+    assert render.cut_plan(13.0, 6.0, 3) == [(0.0, 2.0), (5.5, 2.0), (11.0, 2.0)]
+    # not enough footage to spread: one window, never past the end
+    assert render.cut_plan(3.0, 4.0, 2) == [(0.0, 3.0)]
+    assert render.cut_plan(13.0, 4.0, 1) == [(0.0, 4.0)]
+    assert render.cut_plan(0.0, 4.0, 2) == [(0.0, 4.0)]
+    assert "zoompan" in render._vf(Path("x.ass"), "[src]", [0.0, 2.0])
+    assert "zoompan" not in render._vf(Path("x.ass"))

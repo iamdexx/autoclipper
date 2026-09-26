@@ -143,6 +143,7 @@ def test_top10_build_drops_entries_without_footage(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
     cfg.verify.min_entries = 3
     cfg.top10.items = 4
+    cfg.top10.music = False  # concat is faked below, so there is no file to mix under
     script = top10.Script(
         topic="plays",
         title="Top 4 plays of the week",
@@ -157,7 +158,7 @@ def test_top10_build_drops_entries_without_footage(tmp_path, monkeypatch):
     monkeypatch.setattr(top10, "fetch_footage", fake_fetch)
     rendered = []
 
-    def fake_render(src, start, dur, voice, words, title, badge, cfg, out):
+    def fake_render(src, cuts, voice, words, title, badge, cfg, out, sfx=None):
         rendered.append(badge)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(b"x")

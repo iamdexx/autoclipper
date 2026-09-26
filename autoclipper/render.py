@@ -14,6 +14,7 @@ from .rank import Moment
 log = logging.getLogger(__name__)
 
 W, H = 1080, 1920
+FPS = 30
 
 
 def _ts(t: float) -> str:
@@ -100,7 +101,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     lines = []
     if badge:
-        lines.append(f"Dialogue: 0,{_ts(0)},{_ts(dur)},Badge,,0,0,0,,{_esc(badge)}")
+        # pop-in: scale 40% -> 115% -> 100% over the first third of a second
+        pop = "{\\fscx40\\fscy40\\t(0,220,\\fscx115\\fscy115)\\t(220,340,\\fscx100\\fscy100)}"
+        lines.append(f"Dialogue: 0,{_ts(0)},{_ts(dur)},Badge,,0,0,0,,{pop}{_esc(badge)}")
     if hook:
         hook_text = "\\N".join(_esc(ln) for ln in _wrap(hook.upper(), c.hook_chars_per_line))
         lines.append(f"Dialogue: 0,{_ts(0)},{_ts(min(dur, hook_secs))},Hook,,0,0,0,,{hook_text}")
@@ -131,15 +134,38 @@ def _has_audio(path: Path) -> bool:
     return bool(out.stdout.strip())
 
 
-def _vf(ass_path: Path) -> str:
-    """Vertical reframe: blurred, zoomed copy of the frame as background, sharp centre on top."""
+def _vf(ass_path: Path, src: str = "[0:v]", punch_at: list[float] | None = None) -> str:
+    """Vertical reframe: blurred, zoomed copy of the frame as background, sharp centre on top.
+    `punch_at`: times (s) where the picture snaps in ~10% and settles back - a cut accent."""
+    punch = ""
+    if punch_at:
+        terms = "+".join(
+            f"exp(-(on-{round(t * FPS)})/5)*gte(on,{round(t * FPS)})" for t in punch_at
+        )
+        punch = (
+            f"fps={FPS},zoompan=z='1+0.10*({terms})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+            f":d=1:s={W}x{H}:fps={FPS},"
+        )
     return (
-        f"[0:v]split=2[bg][fg];"
+        f"{src}split=2[bg][fg];"
         f"[bg]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=20:5[bgb];"
         f"[fg]scale={W}:-2:force_original_aspect_ratio=decrease[fgs];"
-        f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2,"
+        f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2,{punch}"
         f"ass={ass_path.as_posix()}[v]"
     )
+
+
+def cut_plan(avail: float, dur: float, cuts: int) -> list[tuple[float, float]]:
+    """Split `dur` seconds of screen time into `cuts` (start, length) windows spread across
+    `avail` seconds of footage, so an entry shows two different moments instead of one."""
+    cuts = max(1, cuts)
+    if avail <= 0:
+        return [(0.0, dur)]
+    if dur >= avail or cuts == 1:
+        return [(0.0, min(dur, avail))]
+    piece = dur / cuts
+    step = (avail - piece) / (cuts - 1)
+    return [(round(i * step, 3), round(piece, 3)) for i in range(cuts)]
 
 
 _ENC = [
@@ -151,35 +177,60 @@ _ENC = [
 
 def render_narrated(
     source: Path,
-    start: float,
-    dur: float,
+    cuts: list[tuple[float, float]],
     voice: Path | None,
     words: list[Word],
     title: str,
     badge: str,
     cfg: Config,
     out: Path,
+    sfx: Path | None = None,
 ) -> Path:
     """A segment fully voiced by the narrator (Top-10 entries): source audio stays ducked the
-    whole time, captions come from the narration's word timings, badge = big rank number."""
+    whole time, captions come from the narration's word timings, badge = big rank number.
+    `cuts` = (start, length) windows of `source` shown back to back, each with a zoom punch;
+    `sfx` plays at the start (the rank reveal)."""
     out.parent.mkdir(parents=True, exist_ok=True)
+    dur = sum(ln for _, ln in cuts)
     ass_path = out.with_suffix(".ass")
     ass_path.write_text(build_ass(words, title, dur, cfg, hook_secs=dur, badge=badge))
-    vf = _vf(ass_path)
-    inputs = ["-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(source)]
+    src_audio = _has_audio(source)
+    punch_at, t = [], 0.0
+    for _, ln in cuts:
+        punch_at.append(t)
+        t += ln
+    vf = ""
+    for i, (s, ln) in enumerate(cuts):
+        vf += f"[0:v]trim=start={s:.3f}:duration={ln:.3f},setpts=PTS-STARTPTS[c{i}];"
+        if src_audio:
+            vf += f"[0:a]atrim=start={s:.3f}:duration={ln:.3f},asetpts=PTS-STARTPTS[ca{i}];"
+    vf += "".join(f"[c{i}]" for i in range(len(cuts))) + f"concat=n={len(cuts)}:v=1:a=0[src];"
+    if src_audio:
+        vf += "".join(f"[ca{i}]" for i in range(len(cuts)))
+        vf += f"concat=n={len(cuts)}:v=0:a=1[srca];"
+    vf += _vf(ass_path, "[src]", punch_at)
+    inputs = ["-i", str(source)]
     duck = 10 ** (cfg.narration.duck_db / 20)
     pad = f"apad=whole_dur={dur:.3f},atrim=0:{dur:.3f}"
-    if voice and _has_audio(source):
+    tracks = []
+    if src_audio:
+        vf += f";[srca]volume={duck:.3f},{pad}[duck]"
+        tracks.append("[duck]")
+    if voice:
+        vf += f";[{len(inputs) // 2}:a]aresample=48000,{pad}[nar]"
+        inputs += ["-i", str(voice)]
+        tracks.append("[nar]")
+    if sfx:
+        vf += f";[{len(inputs) // 2}:a]aresample=48000,volume=0.7,{pad}[fx]"
+        inputs += ["-i", str(sfx)]
+        tracks.append("[fx]")
+    if len(tracks) > 1:
         vf += (
-            f";[0:a]volume={duck:.3f},{pad}[duck];[1:a]aresample=48000,{pad}[nar];"
-            f"[duck][nar]amix=inputs=2:duration=shortest:dropout_transition=0,volume=2[a]"
+            f";{''.join(tracks)}amix=inputs={len(tracks)}:duration=shortest"
+            f":dropout_transition=0:normalize=0[a]"
         )
-        inputs += ["-i", str(voice)]
-    elif voice:
-        vf += f";[1:a]aresample=48000,{pad}[a]"
-        inputs += ["-i", str(voice)]
-    elif _has_audio(source):
-        vf += f";[0:a]volume={duck:.3f},{pad}[a]"
+    elif tracks:
+        vf += f";{tracks[0]}acopy[a]"
     else:
         vf += f";anullsrc=r=48000:cl=stereo,atrim=0:{dur:.3f}[a]"
     cmd = ["ffmpeg", "-y", "-loglevel", "error", *inputs, "-filter_complex", vf]

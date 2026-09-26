@@ -12,7 +12,7 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import narrate, render, trends, verify
+from . import narrate, render, sfx, trends, verify
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -42,14 +42,17 @@ Context: {angle}
 Rules: countdown from {n} to 1, best last. Every entry needs real footage findable on YouTube.
 Only REAL, well-documented events/facts - nothing invented; if unsure about a detail leave it out.
 {avoid}
-Narration is read aloud by an energetic narrator: plain spoken words only, no emojis, hashtags,
-stage directions or rank numbers inside the sentences (the video shows the number).
+Narration is read aloud by a hyped, fast-talking narrator: plain spoken words only, no emojis,
+hashtags, stage directions or rank numbers inside the sentences (the video shows the number).
+Style: the intro is a cold open that promises a payoff ("...and number one broke the internet");
+every line leads with the most shocking concrete detail (a number, a name, a consequence), stays
+under 20 words, and every 2nd or 3rd entry ends with a short tease toward what's next.
 Return ONLY JSON:
 {{"title": "<Top {n} ... - punchy, max 8 words>",
-  "intro": "<1 sentence hook the narrator opens with, max 14 words>",
+  "intro": "<1 sentence cold-open hook, max 14 words>",
   "hashtags": ["#a", "#b", "#c", "#d"],
   "entries": [{{"rank": {n}, "name": "<entry, max 5 words>",
-                "line": "<1-2 sentences, 12-24 words, specific and punchy>",
+                "line": "<1-2 sentences, 10-20 words, specific and punchy>",
                 "query": "<YouTube search that finds footage of exactly this>"}}, ...]}}
 """
 
@@ -261,24 +264,35 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
     for e in script.entries:
         segments.append((e.line, e.name, f"#{e.rank}", e))
 
+    whoosh = sfx.whoosh(cfg.workdir / "assets" / "whoosh.m4a") if t.sfx else None
     for i, (text, title, badge, entry) in enumerate(segments):
         seg = vdir / "segments" / f"{i:02d}.mp4"
         voiced = narrate.synthesize_timed(text, cfg, seg.with_suffix(".voice.m4a"))
         if voiced:
             voice, words = voiced
-            dur = max(t.item_min_s, narrate.duration(voice) + 0.6)  # never cut speech
+            dur = max(t.item_min_s, narrate.duration(voice) + 0.4)  # never cut speech
         else:
             voice, words = None, narrate.even_words(text, t.item_min_s)
             dur = t.item_min_s
         src = footage[id(entry)]
-        # intro uses a different offset of the same footage so the visuals differ from entry 1
-        start = 0.0 if badge else 1.0
-        dur = min(dur, max(1.0, narrate.duration(src) - start))
-        render.render_narrated(src, start, dur, voice, words, title, badge, cfg, seg)
+        avail = narrate.duration(src)
+        # the intro rides on entry N's footage: play its cuts in reverse order so the two
+        # segments don't open on the same frame
+        cuts = render.cut_plan(avail, min(dur, max(1.0, avail)), t.cuts_per_entry)
+        if not badge:
+            cuts = cuts[::-1]
+        render.render_narrated(src, cuts, voice, words, title, badge, cfg, seg, sfx=whoosh)
         parts.append(seg)
 
     out = vdir / f"{_slug(script.title)}.mp4"
-    return render.concat(parts, out)
+    render.concat(parts, out)
+    bed = sfx.music_bed(narrate.duration(out), cfg, vdir / "music.m4a")
+    if bed:
+        raw = out.with_name(out.stem + ".nomusic.mp4")
+        out.rename(raw)
+        sfx.mix_under(raw, bed, t.music_db, out)
+        raw.unlink()
+    return out
 
 
 def pick_topic(cfg: Config, used: list[str]) -> tuple[str, str] | None:
