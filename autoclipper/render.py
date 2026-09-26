@@ -6,6 +6,7 @@ import logging
 import subprocess
 from pathlib import Path
 
+from . import narrate
 from .config import Config
 from .ingest import Segment, Word
 from .rank import Moment
@@ -73,7 +74,7 @@ def _group_words(words: list[Word], max_words: int, max_chars: int) -> list[list
     return groups
 
 
-def build_ass(words: list[Word], hook: str, dur: float, cfg: Config) -> str:
+def build_ass(words: list[Word], hook: str, dur: float, cfg: Config, hook_secs: float = 4.0) -> str:
     c = cfg.captions
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -92,7 +93,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     lines = []
     if hook:
         hook_text = "\\N".join(_esc(ln) for ln in _wrap(hook.upper(), c.hook_chars_per_line))
-        lines.append(f"Dialogue: 0,{_ts(0)},{_ts(min(dur, 4.0))},Hook,,0,0,0,,{hook_text}")
+        lines.append(f"Dialogue: 0,{_ts(0)},{_ts(min(dur, hook_secs))},Hook,,0,0,0,,{hook_text}")
     for group in _group_words(words, c.words_per_line, c.chars_per_line):
         g_start = group[0].start
         g_end = max(group[-1].end, g_start + 0.3)
@@ -115,9 +116,25 @@ def render_clip(
 ) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     dur = moment.end - moment.start
+
+    voice = narrate.synthesize(moment.narration, cfg, out.with_suffix(".voice.m4a"))
+    voice_len = 0.0
+    tempo = 1.0
+    if voice:
+        voice_len = narrate.duration(voice)
+        if voice_len > cfg.narration.max_len_s:
+            tempo = min(1.3, voice_len / cfg.narration.max_len_s)
+            voice_len /= tempo
+
     ass_path = out.with_suffix(".ass")
     ass_path.write_text(
-        build_ass(words_in(segments, moment.start, moment.end), moment.hook, dur, cfg)
+        build_ass(
+            words_in(segments, moment.start, moment.end),
+            moment.hook,
+            dur,
+            cfg,
+            hook_secs=max(4.0, voice_len + 0.5),
+        )
     )
 
     # Vertical reframe: blurred, zoomed copy of the frame as background, sharp centre crop on top.
@@ -128,23 +145,30 @@ def render_clip(
         f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2,"
         f"ass={ass_path.as_posix()}[v]"
     )
+    inputs = ["-ss", f"{moment.start:.3f}", "-t", f"{dur:.3f}", "-i", str(source)]
+    audio_map = ["-map", "0:a?"]
+    if voice:
+        duck = 10 ** (cfg.narration.duck_db / 20)
+        lead = 0.25
+        vf += (
+            f";[0:a]volume={duck:.3f}:enable='lt(t,{voice_len + lead + 0.3:.2f})'[duck];"
+            f"[1:a]atempo={tempo:.3f},adelay={int(lead * 1000)}|{int(lead * 1000)},"
+            f"aresample=48000,apad[nar];"
+            f"[duck][nar]amix=inputs=2:duration=first:dropout_transition=0,volume=2[a]"
+        )
+        inputs += ["-i", str(voice)]
+        audio_map = ["-map", "[a]"]
     cmd = [
         "ffmpeg",
         "-y",
         "-loglevel",
         "error",
-        "-ss",
-        f"{moment.start:.3f}",
-        "-t",
-        f"{dur:.3f}",
-        "-i",
-        str(source),
+        *inputs,
         "-filter_complex",
         vf,
         "-map",
         "[v]",
-        "-map",
-        "0:a?",
+        *audio_map,
         "-c:v",
         "libx264",
         "-preset",

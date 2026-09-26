@@ -2,7 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from autoclipper import rank, render
+from autoclipper import narrate, rank, render
 from autoclipper.config import Config
 from autoclipper.ingest import Segment, Word
 from autoclipper.rank import Moment
@@ -17,6 +17,7 @@ def _cfg(tmp_path):
     cfg.clips.min_len_s = 4
     cfg.clips.target_len_s = 6
     cfg.clips.max_len_s = 10
+    cfg.narration.provider = "off"
     return cfg
 
 
@@ -60,8 +61,7 @@ def test_llm_output_parsing_and_snapping(tmp_path, monkeypatch):
     assert moments[0].start == 0.0 and moments[0].end == 6.0
 
 
-def test_render_produces_vertical_mp4(tmp_path):
-    cfg = _cfg(tmp_path)
+def _src(tmp_path):
     src = tmp_path / "src.mp4"
     subprocess.check_call(
         [
@@ -71,6 +71,12 @@ def test_render_produces_vertical_mp4(tmp_path):
             "-t", "8", "-pix_fmt", "yuv420p", "-c:a", "aac", str(src),
         ]
     )  # fmt: skip
+    return src
+
+
+def test_render_produces_vertical_mp4(tmp_path):
+    cfg = _cfg(tmp_path)
+    src = _src(tmp_path)
     segs = _segments(4)
     m = Moment(0.0, 6.0, "TEST HOOK", "r", 1.0)
     out = render.render_clip(src, m, segs, cfg, tmp_path / "clip.mp4")
@@ -82,3 +88,47 @@ def test_render_produces_vertical_mp4(tmp_path):
     ).decode()  # fmt: skip
     assert probe.strip() == "1080,1920"
     assert (tmp_path / "clip.ass").read_text().count("Dialogue:") > 5
+
+
+def test_render_mixes_narration(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.narration.provider = "gemini"
+    cfg.narration.max_len_s = 1.0
+    src = _src(tmp_path)
+
+    def fake_tts(text, cfg_, out):
+        # 2s of a 1 kHz tone stands in for the narrator; longer than max_len so tempo kicks in
+        subprocess.check_call(
+            ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=1000",
+             "-t", "2", "-c:a", "aac", str(out)]
+        )  # fmt: skip
+        return out
+
+    monkeypatch.setattr(narrate, "synthesize", fake_tts)
+    m = Moment(0.0, 6.0, "TEST HOOK", "r", 1.0, narration="wait for it")
+    out = render.render_clip(src, m, _segments(4), cfg, tmp_path / "clip.mp4")
+    streams = subprocess.check_output(
+        ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(out)]
+    ).decode()  # fmt: skip
+    assert streams.split() == ["video", "audio"]
+    assert abs(narrate.duration(out) - 6.0) < 0.3
+    assert (tmp_path / "clip.voice.m4a").exists()
+
+
+def test_narration_provider_selection(monkeypatch):
+    cfg = Config.load(ROOT / "config.yaml")
+    for k in (
+        "ELEVENLABS_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "Geminikey",
+        "OPENAI_API_KEY",
+    ):
+        monkeypatch.delenv(k, raising=False)
+    assert narrate.pick_provider(cfg) is None
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    assert narrate.pick_provider(cfg) == "gemini"
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "x")
+    assert narrate.pick_provider(cfg) == "elevenlabs"
+    cfg.narration.provider = "off"
+    assert narrate.pick_provider(cfg) is None

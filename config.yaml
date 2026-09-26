@@ -28,3 +28,10 @@ publishing:
   youtube: true
   tiktok: true
   instagram: true
+
+narration:
+  provider: auto        # auto | gemini | elevenlabs | openai | off
+  gemini_voice: Puck    # Kore, Charon, Fenrir, Aoede, Leda ...
+  style: "Speak like an excited, charismatic YouTuber hyping up a clip, fast and punchy"
+  duck_db: -14
+  max_len_s: 6

@@ -39,6 +39,17 @@ class CaptionStyle:
 
 
 @dataclass
+class Narration:
+    provider: str = "auto"  # auto | elevenlabs | gemini | openai | off
+    gemini_voice: str = "Puck"
+    elevenlabs_voice: str = "pNInz6obpgDQGcFmaJgB"  # "Adam"
+    openai_voice: str = "onyx"
+    style: str = "Speak like an excited, charismatic YouTuber hyping up a clip, fast and punchy"
+    duck_db: float = -14.0  # how far the stream audio drops under the narrator
+    max_len_s: float = 6.0
+
+
+@dataclass
 class Publishing:
     dry_run: bool = True
     youtube: bool = False
@@ -62,6 +73,7 @@ class Config:
     clips: ClipRules = field(default_factory=ClipRules)
     captions: CaptionStyle = field(default_factory=CaptionStyle)
     publishing: Publishing = field(default_factory=Publishing)
+    narration: Narration = field(default_factory=Narration)
     poll_interval_s: int = 900
     max_videos_per_run: int = 2
 
@@ -72,6 +84,7 @@ class Config:
         clips = ClipRules(**raw.pop("clips", {}))
         captions = CaptionStyle(**raw.pop("captions", {}))
         publishing = Publishing(**raw.pop("publishing", {}))
+        narration = Narration(**raw.pop("narration", {}))
         workdir = Path(os.path.expanduser(raw.pop("workdir", "data")))
         return cls(
             creators=creators,
@@ -79,5 +92,6 @@ class Config:
             clips=clips,
             captions=captions,
             publishing=publishing,
+            narration=narration,
             **raw,
         )

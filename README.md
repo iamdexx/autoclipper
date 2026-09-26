@@ -8,6 +8,7 @@ watch creators' YouTube channels
   -> download (yt-dlp) + transcribe with word timestamps (faster-whisper)
   -> LLM (Gemini / Claude / OpenAI) picks the moments most likely to go viral
   -> ffmpeg cuts each moment, reframes to 9:16 (blurred background), burns karaoke captions + hook title
+  -> a natural TTS narrator speaks a 1-2 sentence hook over the intro, stream audio ducked underneath
   -> auto-posts to YouTube Shorts, TikTok and Instagram Reels
 ```
 
@@ -32,6 +33,20 @@ autoclipper watch   # loop forever (poll_interval_s)
 
 Edit `config.yaml` to add creators (handle or channel_id), clip counts/lengths, caption style.
 With no LLM key set, a heuristic ranker (speech density, hype words, exclamations) is used.
+
+## Narration
+
+Each clip opens with an AI narrator (the LLM writes the spoken hook, e.g. *"Imagine getting kicked
+out of the company you built from your garage."*). Voices are real neural TTS, not robotic:
+
+| provider (`narration.provider`) | key | default voice |
+|---|---|---|
+| `gemini` | `GEMINI_API_KEY` (same key as ranking, free tier) | `Puck` — also try Kore, Charon, Fenrir, Aoede, Leda |
+| `elevenlabs` | `ELEVENLABS_API_KEY` (best quality, 10k chars/month free) | Adam |
+| `openai` | `OPENAI_API_KEY` | onyx |
+
+`auto` picks ElevenLabs > Gemini > OpenAI. Tune `narration.style`, `duck_db`, `max_len_s`, or set
+`provider: off` in `config.yaml` to keep only the creator's own audio.
 
 ## Publishing
 

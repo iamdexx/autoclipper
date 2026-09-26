@@ -26,6 +26,7 @@ class Moment:
     hook: str  # short title / on-screen hook line
     reason: str
     score: float
+    narration: str = ""  # 1-2 spoken sentences read by the narrator over the intro
 
 
 # ---------- candidate windows ----------
@@ -96,7 +97,14 @@ def _hook_from_text(text: str) -> str:
 
 def rank_heuristic(cands, cfg: Config) -> list[Moment]:
     scored = [
-        Moment(s, e, _hook_from_text(t), "heuristic: energy/keywords", heuristic_score(t, e - s))
+        Moment(
+            s,
+            e,
+            _hook_from_text(t),
+            "heuristic: energy/keywords",
+            heuristic_score(t, e - s),
+            narration=f"You need to hear this. {_hook_from_text(t)}.",
+        )
         for s, e, t in cands
     ]
     return _dedupe(sorted(scored, key=lambda m: -m.score), cfg.clips.count)
@@ -121,6 +129,7 @@ laughter, money/numbers, controversy, or a clear story with payoff. Each clip mu
 {min_len} and {max_len} seconds, must start at a natural sentence beginning and end on a payoff.
 Return ONLY a JSON array, no prose, each item:
 {{"start": <seconds float>, "end": <seconds float>, "hook": "<punchy 4-9 word on-screen title>",
+  "narration": "<1-2 short spoken sentences (max 20 words) a hype narrator says before the clip to make viewers stay, e.g. 'Wait for what he says about his boss.' No hashtags, no emojis.>",
   "reason": "<one sentence>", "score": <0-10>}}
 
 TRANSCRIPT:
@@ -251,6 +260,7 @@ def rank_llm(segments: list[Segment], cfg: Config, creator: str, provider: str) 
                 str(it.get("hook", ""))[:80],
                 str(it.get("reason", "")),
                 float(it.get("score", 5)),
+                narration=str(it.get("narration", ""))[:240],
             )
         )
     return _dedupe(sorted(moments, key=lambda m: -m.score), cfg.clips.count)
