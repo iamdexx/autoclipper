@@ -29,6 +29,9 @@ class ClipRules:
 class CaptionStyle:
     font: str = "DejaVu Sans"
     size: int = 64
+    style: str = (
+        "word"  # word: one big word at a time | highlight: line with the spoken word coloured
+    )
     words_per_line: int = 3
     chars_per_line: int = 22  # fits 1080px at size 64 with outline
     hook_chars_per_line: int = 24
