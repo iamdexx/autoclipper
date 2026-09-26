@@ -167,26 +167,38 @@ def _pick_provider(cfg: Config) -> str:
     return "heuristic"
 
 
+# tried in order when the request is throttled / the model is overloaded
+GEMINI_MODELS = [
+    "gemini-flash-latest",
+    "gemini-3.7-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-flash-lite-latest",
+]
+
+
 def _call_gemini(prompt: str, model: str | None) -> str:
     import requests
 
     key = _gemini_key()
-    model = model or "gemini-flash-latest"
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    models = [model] if model else GEMINI_MODELS
     body = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.4, "responseMimeType": "application/json"},
     }
     last: Exception | None = None
     for attempt in range(4):
-        r = requests.post(url, headers={"x-goog-api-key": key}, json=body, timeout=180)
-        if r.status_code in (429, 500, 503):
-            last = RuntimeError(f"gemini {r.status_code}: {r.text[:200]}")
-            time.sleep(5 * (attempt + 1))
-            continue
-        r.raise_for_status()
-        parts = r.json()["candidates"][0]["content"]["parts"]
-        return "".join(p.get("text", "") for p in parts)
+        for m in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+            r = requests.post(url, headers={"x-goog-api-key": key}, json=body, timeout=180)
+            if r.status_code in (429, 500, 503):
+                last = RuntimeError(f"gemini {m} {r.status_code}: {r.text[:200]}")
+                log.warning("%s - trying next model", last)
+                continue
+            r.raise_for_status()
+            parts = r.json()["candidates"][0]["content"]["parts"]
+            return "".join(p.get("text", "") for p in parts)
+        time.sleep(5 * (attempt + 1))
     raise last or RuntimeError("gemini unavailable")
 
 

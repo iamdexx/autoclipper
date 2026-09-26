@@ -27,6 +27,18 @@ class State:
         self.data["videos"][video_id] = {"status": status, "at": time.time(), **extra}
         self.save()
 
+    def used_topics(self, kind: str) -> list[str]:
+        """Topics already covered for `kind` ('trend' | 'top10'), oldest first."""
+        items = self.data.get("topics", {}).get(kind, {})
+        return [name for name, _ in sorted(items.items(), key=lambda kv: kv[1].get("at", 0))]
+
+    def mark_topic(self, kind: str, name: str, **extra) -> None:
+        self.data.setdefault("topics", {}).setdefault(kind, {})[name] = {
+            "at": time.time(),
+            **extra,
+        }
+        self.save()
+
     def record_post(self, video_id: str, clip: str, platform: str, result: dict) -> None:
         self.data["posts"].append(
             {"video": video_id, "clip": clip, "platform": platform, "at": time.time(), **result}

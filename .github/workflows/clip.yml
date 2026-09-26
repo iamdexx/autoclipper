@@ -40,5 +40,7 @@ jobs:
         if: always()
         with:
           name: clips
-          path: data/videos/*/clips/*.mp4
+          path: |
+            data/videos/*/clips/*.mp4
+            data/top10/*/*.mp4
           if-no-files-found: ignore

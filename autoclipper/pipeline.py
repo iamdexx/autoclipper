@@ -6,7 +6,7 @@ import re
 from dataclasses import asdict
 from pathlib import Path
 
-from . import ingest, publish, rank, render
+from . import ingest, publish, rank, render, top10, trends
 from .config import Config, Creator
 from .state import State
 
@@ -59,7 +59,7 @@ def process_video(
     return clips
 
 
-def run_once(cfg: Config, state: State) -> int:
+def run_creators(cfg: Config, state: State) -> int:
     todo = ingest.new_videos(cfg, state.seen)
     if not todo:
         log.info("no new videos")
@@ -73,4 +73,81 @@ def run_once(cfg: Config, state: State) -> int:
         except Exception as e:
             log.exception("failed on %s: %s", vid, e)
             state.mark_video(vid, "error", error=str(e), creator=creator.name)
+    return n
+
+
+def run_trends(cfg: Config, state: State, do_publish: bool = True) -> int:
+    """Clip the best source video for each trending topic the LLM picks."""
+    found = trends.discover(cfg)
+    log.info("%d trending topics found", len(found))
+    picked = trends.pick_topics(found, cfg, state.used_topics("trend"))
+    n = 0
+    for tp in picked:
+        state.mark_topic("trend", tp.name, status="picked", query=tp.query)
+        try:
+            src = trends.pick_source(tp, cfg)
+        except Exception as e:
+            log.warning("source search failed for %r: %s", tp.name, e)
+            src = None
+        if not src:
+            state.mark_topic("trend", tp.name, status="no_source")
+            continue
+        if state.seen(src.id):
+            state.mark_topic("trend", tp.name, status="already_clipped", video=src.id)
+            continue
+        creator = Creator(
+            name=src.channel or tp.name,
+            min_duration_s=cfg.trends.min_duration_s,
+            max_duration_s=cfg.trends.max_duration_s,
+            hashtags=tp.hashtags,
+        )
+        log.info("trend %r -> %s (%s)", tp.name, src.title, src.url)
+        try:
+            clips = process_video(src.url, creator, cfg, state, do_publish=do_publish)
+            state.mark_topic("trend", tp.name, status="done", video=src.id, clips=len(clips))
+            n += 1
+        except Exception as e:
+            log.exception("trend %r failed: %s", tp.name, e)
+            state.mark_topic("trend", tp.name, status="error", error=str(e))
+    return n
+
+
+def make_top10(
+    topic: str, angle: str, cfg: Config, state: State, do_publish: bool = True
+) -> Path | None:
+    key = _slug(topic)
+    vdir = cfg.workdir / "top10" / key
+    state.mark_topic("top10", topic, status="building")
+    try:
+        out, script = top10.make(topic, angle, cfg, vdir)
+    except Exception as e:
+        log.exception("top10 %r failed: %s", topic, e)
+        state.mark_topic("top10", topic, status="error", error=str(e))
+        return None
+    state.mark_topic("top10", topic, status="done", video=out.name, title=script.title)
+    if do_publish:
+        res = publish.publish_all(out, script.title, "autoclipper", script.hashtags, cfg)
+        for platform, r in res.items():
+            state.record_post(f"top10:{key}", out.name, platform, r)
+    return out
+
+
+def run_top10(cfg: Config, state: State) -> int:
+    n = 0
+    for _ in range(cfg.top10.per_run):
+        pick = top10.pick_topic(cfg, state.used_topics("top10"))
+        if not pick:
+            log.info("no top10 topic available")
+            break
+        if make_top10(pick[0], pick[1], cfg, state):
+            n += 1
+    return n
+
+
+def run_once(cfg: Config, state: State) -> int:
+    n = run_creators(cfg, state) if cfg.creators else 0
+    if cfg.trends.enabled:
+        n += run_trends(cfg, state)
+    if cfg.top10.enabled:
+        n += run_top10(cfg, state)
     return n

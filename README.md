@@ -14,6 +14,14 @@ watch creators' YouTube channels
 
 No Everygen subscription, no Claude desktop, no manual downloading/posting.
 
+Three content modes run side by side on every pass (`autoclipper run`):
+
+| mode | on when | what it does |
+|---|---|---|
+| creators | `creators:` non-empty | the flow above for every new upload/VOD of the listed channels |
+| trends | `trends.enabled` | scrapes what's blowing up, picks the best source video, clips it like a stream |
+| top10 | `top10.enabled` | writes a "Top 10 ..." countdown, pulls footage per entry, narrates the whole thing |
+
 ## Quick start
 
 ```bash
@@ -48,6 +56,30 @@ out of the company you built from your garage."*). Voices are real neural TTS, n
 `auto` picks ElevenLabs > Gemini > OpenAI. Tune `duck_db`, `max_len_s`, or set
 `provider: off` in `config.yaml` to keep only the creator's own audio.
 
+## Trends
+
+```
+Google Trends daily RSS (per geo)  +  most-viewed YouTube uploads of the last 24h per niche
+  -> LLM picks `topics_per_run` topics that fit your niches + writes the YouTube query/angle/hashtags
+  -> yt-dlp search, LLM picks the best source video (duration-filtered)
+  -> normal clip pipeline (transcribe, rank, cut, caption, narrate, publish)
+```
+
+Everything is keyless; a failing source is skipped. Covered topics are remembered in
+`state.json` so the same trend isn't clipped twice. `autoclipper trends` prints what's hot and what
+would be picked; add `--clip` to actually make the clips.
+
+## Top 10 videos
+
+`autoclipper top10 "craziest NFL plays this week"` (or no topic: picked from trends /
+`top10.topics`) makes one vertical countdown video:
+
+- LLM writes title, hook intro, 10 ranked entries with a spoken line + footage query each
+- per entry: yt-dlp grabs a short section of the top YouTube result, ffmpeg reframes to 9:16
+- narrator (ElevenLabs word timestamps -> synced karaoke captions) voices every line, source
+  audio ducked under it, big `#10 ... #1` badge + entry title on screen
+- segments are concatenated into one MP4 in `data/top10/<slug>/`
+
 ## Publishing
 
 Everything is `dry_run: true` by default: clips render and the log shows what *would* be posted.
@@ -81,6 +113,8 @@ while on CPU — set `whisper_model: tiny` there or run on a GPU box).
 
 - `autoclipper/ingest.py` — channel feeds, yt-dlp download, whisper transcript
 - `autoclipper/rank.py` — candidate windows, LLM prompt + parsing, heuristic fallback
+- `autoclipper/trends.py` — Google Trends / YouTube hot search, LLM topic + source picking
+- `autoclipper/top10.py` — countdown script, footage fetch, segment render + concat
 - `autoclipper/render.py` — ffmpeg reframe + ASS caption generation
 - `autoclipper/publish.py` — YouTube / TikTok / Instagram uploaders
 - `autoclipper/pipeline.py` — glue; `autoclipper/cli.py` — commands

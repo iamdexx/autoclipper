@@ -62,6 +62,27 @@ class Publishing:
 
 
 @dataclass
+class Trends:
+    enabled: bool = False
+    niches: list[str] = field(default_factory=list)  # e.g. ["sports", "gaming", "celebrity drama"]
+    geos: list[str] = field(default_factory=lambda: ["US"])  # Google Trends regions
+    topics_per_run: int = 2
+    min_duration_s: int = 120  # source videos for trend clips can be shorter than streams
+    max_duration_s: int = 2 * 3600
+
+
+@dataclass
+class TopTen:
+    enabled: bool = False
+    per_run: int = 1  # how many Top-10 videos to make per run
+    items: int = 10
+    item_min_s: float = 3.5  # each entry lasts at least this (longer if the narration is)
+    item_max_s: float = 10.0  # how much footage to fetch per entry
+    source_max_duration_s: int = 30 * 60  # only clip from sources up to this long
+    topics: list[str] = field(default_factory=list)  # fixed ideas; empty = derive from trends
+
+
+@dataclass
 class Config:
     creators: list[Creator]
     workdir: Path = Path("data")
@@ -73,6 +94,8 @@ class Config:
     captions: CaptionStyle = field(default_factory=CaptionStyle)
     publishing: Publishing = field(default_factory=Publishing)
     narration: Narration = field(default_factory=Narration)
+    trends: Trends = field(default_factory=Trends)
+    top10: TopTen = field(default_factory=TopTen)
     poll_interval_s: int = 900
     max_videos_per_run: int = 2
 
@@ -84,6 +107,8 @@ class Config:
         captions = CaptionStyle(**raw.pop("captions", {}))
         publishing = Publishing(**raw.pop("publishing", {}))
         narration = Narration(**raw.pop("narration", {}))
+        trends = Trends(**raw.pop("trends", {}))
+        top10 = TopTen(**raw.pop("top10", {}))
         workdir = Path(os.path.expanduser(raw.pop("workdir", "data")))
         return cls(
             creators=creators,
@@ -92,5 +117,7 @@ class Config:
             captions=captions,
             publishing=publishing,
             narration=narration,
+            trends=trends,
+            top10=top10,
             **raw,
         )

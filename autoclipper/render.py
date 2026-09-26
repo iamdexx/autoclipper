@@ -74,7 +74,14 @@ def _group_words(words: list[Word], max_words: int, max_chars: int) -> list[list
     return groups
 
 
-def build_ass(words: list[Word], hook: str, dur: float, cfg: Config, hook_secs: float = 4.0) -> str:
+def build_ass(
+    words: list[Word],
+    hook: str,
+    dur: float,
+    cfg: Config,
+    hook_secs: float = 4.0,
+    badge: str = "",
+) -> str:
     c = cfg.captions
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -86,11 +93,14 @@ WrapStyle: 0
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Cap,{c.font},{c.size},{c.base_color},{c.base_color},&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{c.outline},2,2,60,60,{c.margin_v},1
 Style: Hook,{c.font},{int(c.size * 0.85)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{c.outline},2,8,60,60,300,1
+Style: Badge,{c.font},{int(c.size * 2.6)},{c.highlight_color},{c.highlight_color},&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{c.outline + 2},3,8,60,60,110,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     lines = []
+    if badge:
+        lines.append(f"Dialogue: 0,{_ts(0)},{_ts(dur)},Badge,,0,0,0,,{_esc(badge)}")
     if hook:
         hook_text = "\\N".join(_esc(ln) for ln in _wrap(hook.upper(), c.hook_chars_per_line))
         lines.append(f"Dialogue: 0,{_ts(0)},{_ts(min(dur, hook_secs))},Hook,,0,0,0,,{hook_text}")
@@ -119,6 +129,75 @@ def _has_audio(path: Path) -> bool:
         text=True,
     )  # fmt: skip
     return bool(out.stdout.strip())
+
+
+def _vf(ass_path: Path) -> str:
+    """Vertical reframe: blurred, zoomed copy of the frame as background, sharp centre on top."""
+    return (
+        f"[0:v]split=2[bg][fg];"
+        f"[bg]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=20:5[bgb];"
+        f"[fg]scale={W}:-2:force_original_aspect_ratio=decrease[fgs];"
+        f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2,"
+        f"ass={ass_path.as_posix()}[v]"
+    )
+
+
+_ENC = [
+    *("-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-r", "30"),
+    *("-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2"),
+    *("-movflags", "+faststart"),
+]
+
+
+def render_narrated(
+    source: Path,
+    start: float,
+    dur: float,
+    voice: Path | None,
+    words: list[Word],
+    title: str,
+    badge: str,
+    cfg: Config,
+    out: Path,
+) -> Path:
+    """A segment fully voiced by the narrator (Top-10 entries): source audio stays ducked the
+    whole time, captions come from the narration's word timings, badge = big rank number."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    ass_path = out.with_suffix(".ass")
+    ass_path.write_text(build_ass(words, title, dur, cfg, hook_secs=dur, badge=badge))
+    vf = _vf(ass_path)
+    inputs = ["-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(source)]
+    duck = 10 ** (cfg.narration.duck_db / 20)
+    pad = f"apad=whole_dur={dur:.3f},atrim=0:{dur:.3f}"
+    if voice and _has_audio(source):
+        vf += (
+            f";[0:a]volume={duck:.3f},{pad}[duck];[1:a]aresample=48000,{pad}[nar];"
+            f"[duck][nar]amix=inputs=2:duration=shortest:dropout_transition=0,volume=2[a]"
+        )
+        inputs += ["-i", str(voice)]
+    elif voice:
+        vf += f";[1:a]aresample=48000,{pad}[a]"
+        inputs += ["-i", str(voice)]
+    elif _has_audio(source):
+        vf += f";[0:a]volume={duck:.3f},{pad}[a]"
+    else:
+        vf += f";anullsrc=r=48000:cl=stereo,atrim=0:{dur:.3f}[a]"
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", *inputs, "-filter_complex", vf]
+    cmd += ["-map", "[v]", "-map", "[a]", *_ENC, str(out)]
+    subprocess.check_call(cmd)
+    return out
+
+
+def concat(parts: list[Path], out: Path) -> Path:
+    """Join segments rendered with the same _ENC settings."""
+    lst = out.with_suffix(".txt")
+    lst.write_text("".join(f"file '{p.resolve().as_posix()}'\n" for p in parts))
+    subprocess.check_call(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(lst)]
+        + ["-c", "copy", "-movflags", "+faststart", str(out)]
+    )
+    lst.unlink()
+    return out
 
 
 def render_clip(
@@ -152,14 +231,7 @@ def render_clip(
         )
     )
 
-    # Vertical reframe: blurred, zoomed copy of the frame as background, sharp centre crop on top.
-    vf = (
-        f"[0:v]split=2[bg][fg];"
-        f"[bg]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=20:5[bgb];"
-        f"[fg]scale={W}:-2:force_original_aspect_ratio=decrease[fgs];"
-        f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2,"
-        f"ass={ass_path.as_posix()}[v]"
-    )
+    vf = _vf(ass_path)
     inputs = ["-ss", f"{moment.start:.3f}", "-t", f"{dur:.3f}", "-i", str(source)]
     audio_map = ["-map", "0:a?"]
     if voice:
@@ -184,22 +256,7 @@ def render_clip(
         "-map",
         "[v]",
         *audio_map,
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "20",
-        "-pix_fmt",
-        "yuv420p",
-        "-r",
-        "30",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "160k",
-        "-movflags",
-        "+faststart",
+        *_ENC,
         str(out),
     ]
     log.info("rendering %s (%.1fs)", out.name, dur)
