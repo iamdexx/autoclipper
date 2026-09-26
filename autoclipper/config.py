@@ -41,7 +41,9 @@ class CaptionStyle:
 
 @dataclass
 class Narration:
-    provider: str = "auto"  # auto | azure | google | elevenlabs | gemini | openai | off
+    provider: str = "auto"  # auto | edge | azure | google | elevenlabs | gemini | openai | off
+    edge_voice: str = "en-US-AndrewMultilingualNeural"  # Brian/Guy/Christopher/Roger... Neural
+    edge_rate: float = 1.05
     azure_voice: str = "en-US-AndrewMultilingualNeural"  # Brian/Davis/Guy/Steffan... Neural
     azure_rate: float = 1.05
     azure_style: str = ""  # e.g. excited / cheerful, only on voices that list the style

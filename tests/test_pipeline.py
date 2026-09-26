@@ -132,14 +132,14 @@ def test_narration_provider_selection(monkeypatch):
         "OPENAI_API_KEY",
     ):
         monkeypatch.delenv(k, raising=False)
-    assert narrate.pick_provider(cfg) is None
+    assert narrate.providers(cfg) == ["edge"]  # no key needed
     monkeypatch.setenv("GEMINI_API_KEY", "x")
-    assert narrate.pick_provider(cfg) == "gemini"
+    assert narrate.providers(cfg) == ["edge", "gemini"]
     monkeypatch.setenv("ELEVENLABS_API_KEY", "x")
-    assert narrate.pick_provider(cfg) == "elevenlabs"
+    assert narrate.providers(cfg) == ["edge", "elevenlabs", "gemini"]
     monkeypatch.setenv("GOOGLE_TTS_API_KEY", "x")
     monkeypatch.setenv("AZURE_SPEECH_KEY", "x")
-    assert narrate.providers(cfg) == ["azure", "google", "elevenlabs", "gemini"]
+    assert narrate.providers(cfg) == ["edge", "azure", "google", "elevenlabs", "gemini"]
     cfg.narration.provider = "google"
     assert narrate.providers(cfg) == ["google"]
     cfg.narration.provider = "off"
@@ -155,6 +155,10 @@ def test_narration_falls_through_to_the_next_provider(tmp_path, monkeypatch):
     cfg.narration.provider = "auto"
     calls = []
 
+    def edge(*a):
+        calls.append("edge")
+        raise RuntimeError("endpoint changed")
+
     def azure(*a):
         calls.append("azure")
         raise RuntimeError("quota exceeded")
@@ -164,10 +168,11 @@ def test_narration_falls_through_to_the_next_provider(tmp_path, monkeypatch):
         out.write_bytes(b"x")
         return out
 
+    monkeypatch.setattr(narrate, "tts_edge", edge)
     monkeypatch.setattr(narrate, "tts_azure", azure)
     monkeypatch.setattr(narrate, "tts_google", google)
     assert narrate.synthesize("hi there", cfg, tmp_path / "v.m4a") == tmp_path / "v.m4a"
-    assert calls == ["azure", "google"]
+    assert calls == ["edge", "azure", "google"]
 
 
 def test_timed_narration_tries_each_provider_once(tmp_path, monkeypatch):
@@ -179,6 +184,10 @@ def test_timed_narration_tries_each_provider_once(tmp_path, monkeypatch):
     cfg.narration.provider = "auto"
     calls = []
 
+    def edge_timed(*a):
+        calls.append("edge")
+        raise RuntimeError("endpoint changed")
+
     def eleven_timed(*a):
         calls.append("elevenlabs")
         raise RuntimeError("quota_exceeded")
@@ -188,6 +197,8 @@ def test_timed_narration_tries_each_provider_once(tmp_path, monkeypatch):
         out.write_bytes(b"x")
         return out
 
+    monkeypatch.setattr(narrate, "tts_edge_timed", edge_timed)
+    monkeypatch.setattr(narrate, "tts_edge", lambda *a: calls.append("edge-plain"))
     monkeypatch.setattr(narrate, "tts_elevenlabs_timed", eleven_timed)
     monkeypatch.setattr(narrate, "tts_elevenlabs", lambda *a: calls.append("elevenlabs-plain"))
     monkeypatch.setattr(narrate, "tts_gemini", gemini)
@@ -196,7 +207,23 @@ def test_timed_narration_tries_each_provider_once(tmp_path, monkeypatch):
     got = narrate.synthesize_timed("hi there", cfg, tmp_path / "v.m4a")
     assert got is not None and got[0] == tmp_path / "v.m4a"
     assert [w.text for w in got[1]] == ["hi", "there"]  # evenly spread when whisper hears nothing
-    assert calls == ["elevenlabs", "gemini"]
+    assert calls == ["edge", "elevenlabs", "gemini"]
+
+
+def test_edge_timed_uses_the_streams_word_boundaries(tmp_path, monkeypatch):
+    heard = [Word(0.1, 0.4, "Hi"), Word(0.5, 0.9, "there")]
+
+    def stream(text, voice, rate, out):
+        out.write_bytes(b"x")
+        return out, heard
+
+    monkeypatch.setattr(narrate, "_edge_stream", stream)
+    monkeypatch.setattr(narrate, "duration", lambda p: 1.0)
+    cfg = _cfg(tmp_path)
+    cfg.narration.provider = "edge"
+    voice, words = narrate.synthesize_timed("Hi there!", cfg, tmp_path / "v.m4a")
+    assert voice == tmp_path / "v.m4a"
+    assert [(w.start, w.end, w.text) for w in words] == [(0.1, 0.4, "Hi"), (0.5, 0.9, "there!")]
 
 
 def test_align_words_follows_what_whisper_heard():

@@ -4,16 +4,18 @@ The ranker's `hook` becomes a 1-2 sentence narrator line, voiced by a natural TT
 mixed over the first seconds of the clip with the stream audio ducked underneath.
 
 Providers (config `narration.provider`; `auto` tries them in this order and moves on to the
-next one when a call fails, e.g. a monthly quota running out):
-  azure      : AZURE_SPEECH_KEY + AZURE_SPEECH_REGION (Neural TTS; 500k chars/month free)
+next one when a call fails, e.g. the endpoint being down or a monthly quota running out):
+  edge       : no key at all - the Microsoft neural voices (Andrew, Brian, Guy, ...) through the
+               endpoint Edge's read-aloud uses (unofficial, hence the fallbacks below)
+  azure      : AZURE_SPEECH_KEY + AZURE_SPEECH_REGION (same voices, official; 500k chars/month free)
   google     : GOOGLE_TTS_API_KEY  (Cloud Text-to-Speech Chirp 3 HD; 1M chars/month free)
   elevenlabs : ELEVENLABS_API_KEY  (most natural; free tier 10k chars/month)
   gemini     : GEMINI_API_KEY      (Gemini TTS, prebuilt voices like Puck / Kore / Charon)
   openai     : OPENAI_API_KEY      (tts-1-hd, voices alloy/echo/nova/...)
 
-Word timings for the captions come straight from ElevenLabs; for every other provider the
-narration is run through Whisper and aligned to the script, so the highlight follows the voice
-the same way whichever provider spoke.
+Word timings for the captions come straight from ElevenLabs and Edge; for every other provider
+the narration is run through Whisper and aligned to the script, so the highlight follows the
+voice the same way whichever provider spoke.
 """
 
 from __future__ import annotations
@@ -33,7 +35,7 @@ from .ingest import Word
 
 log = logging.getLogger(__name__)
 
-PROVIDERS = ("azure", "google", "elevenlabs", "gemini", "openai")
+PROVIDERS = ("edge", "azure", "google", "elevenlabs", "gemini", "openai")
 
 # lower stability + higher style = more expressive, "hyped" delivery (still Liam)
 _VOICE_SETTINGS = {
@@ -76,6 +78,7 @@ def _azure_region() -> str:
 
 
 _KEYS = {
+    "edge": lambda: True,
     "azure": _azure_key,
     "google": _google_key,
     "elevenlabs": _elevenlabs_key,
@@ -127,6 +130,44 @@ def tts_azure(text: str, voice: str, rate: float, style: str, out: Path) -> Path
     mp3 = out.with_suffix(".mp3")
     mp3.write_bytes(r.content)
     return _mp3_to_aac(mp3, out)
+
+
+def _edge_stream(text: str, voice: str, rate: float, out: Path) -> tuple[Path, list[Word]]:
+    import asyncio
+
+    import edge_tts
+
+    async def run() -> list[Word]:
+        heard: list[Word] = []
+        com = edge_tts.Communicate(
+            text, voice, rate=f"{(rate - 1) * 100:+.0f}%", boundary="WordBoundary"
+        )
+        with mp3.open("wb") as f:
+            async for chunk in com.stream():
+                if chunk["type"] == "audio":
+                    f.write(chunk["data"])
+                elif chunk["type"] == "WordBoundary":  # offsets in 100ns ticks
+                    s = chunk["offset"] / 1e7
+                    heard.append(Word(s, s + chunk["duration"] / 1e7, chunk["text"]))
+        return heard
+
+    mp3 = out.with_suffix(".mp3")
+    heard = asyncio.run(run())
+    if not mp3.stat().st_size:
+        raise RuntimeError("edge tts returned no audio")
+    _mp3_to_aac(mp3, out)
+    return out, heard
+
+
+def tts_edge(text: str, voice: str, rate: float, out: Path) -> Path:
+    """Microsoft neural voice via the Edge read-aloud endpoint (no account or key)."""
+    return _edge_stream(text, voice, rate, out)[0]
+
+
+def tts_edge_timed(text: str, voice: str, rate: float, out: Path) -> tuple[Path, list[Word]]:
+    """Like tts_edge, plus word timings from the stream's word boundaries."""
+    voice_path, heard = _edge_stream(text, voice, rate, out)
+    return voice_path, align_words(text, heard, duration(voice_path))
 
 
 def _esc_xml(s: str) -> str:
@@ -325,8 +366,11 @@ def synthesize_timed(text: str, cfg: Config, out: Path) -> tuple[Path, list[Word
     out.parent.mkdir(parents=True, exist_ok=True)
     for provider in providers(cfg):
         try:
+            n = cfg.narration
             if provider == "elevenlabs":
-                return tts_elevenlabs_timed(text, cfg.narration.elevenlabs_voice, out)
+                return tts_elevenlabs_timed(text, n.elevenlabs_voice, out)
+            if provider == "edge":
+                return tts_edge_timed(text, n.edge_voice, n.edge_rate, out)
             voice = _tts(provider, text, cfg, out)
         except Exception as e:
             log.warning("narration with %s failed: %s", provider, e)
@@ -358,6 +402,8 @@ def _tts(provider: str, text: str, cfg: Config, out: Path) -> Path:
         return tts_gemini(text, n.gemini_voice, out)
     if provider == "openai":
         return tts_openai(text, n.openai_voice, out)
+    if provider == "edge":
+        return tts_edge(text, n.edge_voice, n.edge_rate, out)
     raise ValueError(f"unknown narration provider {provider!r}")
 
 
