@@ -1,0 +1,43 @@
+name: clip
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    concurrency: autoclipper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - run: pip install -e .
+      - name: restore state
+        uses: actions/cache/restore@v4
+        with:
+          path: data/state.json
+          key: autoclipper-state-${{ github.run_id }}
+          restore-keys: autoclipper-state-
+      - run: autoclipper run
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TIKTOK_ACCESS_TOKEN: ${{ secrets.TIKTOK_ACCESS_TOKEN }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          PUBLIC_BASE_URL: ${{ secrets.PUBLIC_BASE_URL }}
+          YT_TOKEN: ${{ secrets.YT_TOKEN_PATH }}
+      - name: save state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/state.json
+          key: autoclipper-state-${{ github.run_id }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: clips
+          path: data/videos/*/clips/*.mp4
+          if-no-files-found: ignore

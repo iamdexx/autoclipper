@@ -1,0 +1,30 @@
+# Creators to watch. Every new upload/VOD >= min_duration_s gets clipped automatically.
+creators:
+  - name: Adin Ross
+    handle: "@AdinLive"
+    hashtags: ["#adinross", "#kick"]
+  - name: Kai Cenat
+    handle: "@KaiCenatLive"
+    hashtags: ["#kaicenat", "#amp"]
+
+workdir: data
+whisper_model: base          # tiny/base/small/medium — bigger = better captions, slower
+llm_provider: auto           # auto | gemini | anthropic | openai | heuristic
+poll_interval_s: 900
+max_videos_per_run: 2
+
+clips:
+  count: 3
+  min_len_s: 20
+  max_len_s: 60
+  target_len_s: 40
+
+captions:
+  size: 64
+  words_per_line: 3
+
+publishing:
+  dry_run: true              # flip to false once the platform credentials are set
+  youtube: true
+  tiktok: true
+  instagram: true

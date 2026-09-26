@@ -1,0 +1,13 @@
+[Unit]
+Description=autoclipper - auto clip & post creator streams
+After=network-online.target
+
+[Service]
+WorkingDirectory=/opt/autoclipper
+EnvironmentFile=/opt/autoclipper/.env
+ExecStart=/opt/autoclipper/.venv/bin/autoclipper watch
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
