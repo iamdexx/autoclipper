@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import calendar
+import functools
 import json
 import logging
 import subprocess
@@ -117,6 +118,13 @@ def download(url: str, dest: Path, max_height: int = 1080) -> Path:
     return out
 
 
+@functools.lru_cache(maxsize=1)
+def _whisper(model: str, compute: str):
+    from faster_whisper import WhisperModel
+
+    return WhisperModel(model, device="cpu", compute_type=compute)
+
+
 def transcribe(video: Path, cfg: Config, cache: Path) -> list[Segment]:
     if cache.exists():
         raw = json.loads(cache.read_text())
@@ -124,11 +132,10 @@ def transcribe(video: Path, cfg: Config, cache: Path) -> list[Segment]:
             Segment(s["start"], s["end"], s["text"], [Word(**w) for w in s["words"]]) for s in raw
         ]
 
-    from faster_whisper import WhisperModel
-
     log.info("transcribing %s with whisper-%s", video.name, cfg.whisper_model)
-    model = WhisperModel(cfg.whisper_model, device="cpu", compute_type=cfg.whisper_compute)
-    segs, _ = model.transcribe(str(video), word_timestamps=True, vad_filter=True)
+    segs, _ = _whisper(cfg.whisper_model, cfg.whisper_compute).transcribe(
+        str(video), word_timestamps=True, vad_filter=True
+    )
     result: list[Segment] = []
     for s in segs:
         words = [Word(w.start, w.end, w.word.strip()) for w in (s.words or []) if w.word.strip()]

@@ -49,12 +49,19 @@ out of the company you built from your garage."*). Voices are real neural TTS, n
 
 | provider (`narration.provider`) | key | default voice |
 |---|---|---|
+| `edge` | none — Microsoft's neural voices via the Edge read-aloud endpoint (unofficial, free) | `en-US-AndrewMultilingualNeural` — also Brian, Guy, Christopher, Roger (`edge-tts --list-voices`) |
+| `azure` | `AZURE_SPEECH_KEY` + `AZURE_SPEECH_REGION` (Speech resource, Free F0 = 500k chars/month) | `en-US-AndrewMultilingualNeural` — also Brian, Davis, Guy, Steffan, Christopher |
+| `google` | `GOOGLE_TTS_API_KEY` (Cloud Text-to-Speech, Chirp 3 HD, 1M chars/month free) | `Charon` — also Fenrir, Orus, Puck, Algenib, Iapetus |
+| `elevenlabs` | `ELEVENLABS_API_KEY` (most natural, 10k chars/month free) | Liam |
 | `gemini` | `GEMINI_API_KEY` (same key as ranking, free tier) | `Puck` — also try Kore, Charon, Fenrir, Aoede, Leda |
-| `elevenlabs` | `ELEVENLABS_API_KEY` (best quality, 10k chars/month free) | Liam |
 | `openai` | `OPENAI_API_KEY` | onyx |
 
-`auto` picks ElevenLabs > Gemini > OpenAI. Tune `duck_db`, `max_len_s`, or set
-`provider: off` in `config.yaml` to keep only the creator's own audio.
+`auto` tries Edge > Azure > Google > ElevenLabs > Gemini > OpenAI, moving on to the next one
+whenever a call fails (the unofficial Edge endpoint changing, a monthly quota running out
+mid-month), so the cron never goes silent. Word timings for the follow-the-word captions come
+from Edge and ElevenLabs directly; every other provider's audio is run through Whisper and
+aligned to the script so the highlight tracks the voice just the same. Tune `duck_db`,
+`max_len_s`, or set `provider: off` in `config.yaml` to keep only the creator's own audio.
 
 ## Trends
 
