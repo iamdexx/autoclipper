@@ -438,3 +438,15 @@ def test_qa_gate_rejects_silence_black_and_wrong_narration(tmp_path, monkeypatch
 def test_qa_speech_match_ignores_stopwords():
     assert qa.script_match("the Miami Miracle, and it is on", "miami miracle") == 1.0
     assert qa.script_match("the Dolphins pulled off the Miami Miracle", "cats") == 0.0
+
+
+def test_narration_drops_the_engines_trailing_silence(tmp_path):
+    mp3 = tmp_path / "v.mp3"
+    subprocess.check_call(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+         "sine=frequency=440:duration=1.0", "-af", "apad=pad_dur=1.0", str(mp3)]
+    )  # fmt: skip
+    assert 1.9 < narrate.duration(mp3) < 2.2
+    out = narrate._mp3_to_aac(mp3, tmp_path / "v.m4a")
+    assert 1.05 < narrate.duration(out) < 1.35  # 1s of tone + the 0.15s kept
+    assert not mp3.exists()

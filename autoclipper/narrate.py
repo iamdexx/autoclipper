@@ -230,7 +230,7 @@ def tts_gemini(text: str, voice: str, out: Path) -> Path:
         ]
     else:
         cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw)]
-    subprocess.check_call([*cmd, "-c:a", "aac", "-b:a", "128k", str(out)])
+    subprocess.check_call([*cmd, "-af", TRIM_TAIL, "-c:a", "aac", "-b:a", "128k", str(out)])
     raw.unlink()
     return out
 
@@ -252,9 +252,28 @@ def tts_elevenlabs(text: str, voice: str, out: Path) -> Path:
     return _mp3_to_aac(mp3, out)
 
 
+# TTS engines pad the end of the speech with up to ~1s of silence; keep 0.15s of it so the
+# narration ends when the voice does and the gap to whatever follows stays a beat, not dead air
+TRIM_TAIL = (
+    "areverse,silenceremove=start_periods=1:start_silence=0.15:start_threshold=-45dB,areverse"
+)
+
+
 def _mp3_to_aac(mp3: Path, out: Path) -> Path:
     subprocess.check_call(
-        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(mp3), "-c:a", "aac", str(out)]
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-i",
+            str(mp3),
+            "-af",
+            TRIM_TAIL,
+            "-c:a",
+            "aac",
+            str(out),
+        ]
     )
     mp3.unlink()
     return out
