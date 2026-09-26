@@ -53,15 +53,21 @@ def _wrap(text: str, max_chars: int) -> list[str]:
     return out or [text]
 
 
+PAUSE_GAP = 0.5  # silence this long between two words starts a new caption line
+
+
 def _group_words(words: list[Word], max_words: int, max_chars: int) -> list[list[Word]]:
     """Chunk words so each caption line fits: at most max_words and max_chars per line.
-    A sentence-ending word closes the line so lines don't straddle sentences."""
+    A sentence-ending word or a pause closes the line so lines don't straddle sentences,
+    silences, or a change of speaker."""
     groups: list[list[Word]] = []
     cur: list[Word] = []
     cur_len = 0
     for w in words:
         add = len(w.text) + (1 if cur else 0)
-        if cur and (len(cur) >= max_words or cur_len + add > max_chars):
+        if cur and (
+            len(cur) >= max_words or cur_len + add > max_chars or w.start - cur[-1].end >= PAUSE_GAP
+        ):
             groups.append(cur)
             cur, cur_len = [], 0
             add = len(w.text)
@@ -377,7 +383,7 @@ def render_clip(
         if voice_len > dur / 2:
             log.warning("narration %.1fs too long for %.1fs clip, skipping", voice_len, dur)
             voice, voice_words, voice_len, tempo = None, [], 0.0, 1.0
-    intro = voice_len + lead + 0.3 if voice else 0.0
+    intro = voice_len + lead + PAUSE_GAP + 0.1 if voice else 0.0
     total = dur + intro
 
     words = [Word(w.start / tempo + lead, w.end / tempo + lead, w.text) for w in voice_words]

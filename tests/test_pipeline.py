@@ -112,8 +112,8 @@ def test_render_mixes_narration(tmp_path, monkeypatch):
         ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(out)]
     ).decode()  # fmt: skip
     assert streams.split() == ["video", "audio"]
-    # 2s tone at 1.3x = 1.54s of hook + 0.55s of lead/tail ahead of the 6s clip
-    assert abs(narrate.duration(out) - (6.0 + 1.54 + 0.55)) < 0.3
+    # 2s tone at 1.3x = 1.54s of hook + 0.85s of lead/tail ahead of the 6s clip
+    assert abs(narrate.duration(out) - (6.0 + 1.54 + 0.85)) < 0.3
     assert (tmp_path / "clip.voice.m4a").exists()
     ass = (tmp_path / "clip.ass").read_text()
     caps = [ln for ln in ass.splitlines() if ",Cap," in ln]
@@ -138,6 +138,16 @@ def test_narration_provider_selection(monkeypatch):
     assert narrate.pick_provider(cfg) == "elevenlabs"
     cfg.narration.provider = "off"
     assert narrate.pick_provider(cfg) is None
+
+
+def test_captions_never_merge_narrator_and_clip_words(tmp_path):
+    cfg = _cfg(tmp_path)
+    words = [Word(0.3, 0.7, "Watch.")] + [
+        Word(1.4 + i * 0.3, 1.6 + i * 0.3, t) for i, t in enumerate("so I got fired".split())
+    ]
+    ass = render.build_ass(words, "", 4.0, cfg, hook_secs=1.3)
+    caps = [ln.split(",,")[-1] for ln in ass.splitlines() if ",Cap," in ln]
+    assert "Watch." in caps[0] and "so" not in caps[0]
 
 
 def test_top10_build_drops_entries_without_footage(tmp_path, monkeypatch):
