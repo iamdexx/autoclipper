@@ -112,8 +112,12 @@ def test_render_mixes_narration(tmp_path, monkeypatch):
         ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(out)]
     ).decode()  # fmt: skip
     assert streams.split() == ["video", "audio"]
-    assert abs(narrate.duration(out) - 6.0) < 0.3
+    # 2s tone at 1.3x = 1.54s of hook + 0.55s of lead/tail ahead of the 6s clip
+    assert abs(narrate.duration(out) - (6.0 + 1.54 + 0.55)) < 0.3
     assert (tmp_path / "clip.voice.m4a").exists()
+    ass = (tmp_path / "clip.ass").read_text()
+    first = [ln for ln in ass.splitlines() if ",Word," in ln]
+    assert first[0].endswith("WAIT") and first[3].split(",")[1] >= "0:00:02.0"  # clip words after
 
 
 def test_narration_provider_selection(monkeypatch):
