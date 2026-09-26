@@ -286,7 +286,7 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
 
     out = vdir / f"{_slug(script.title)}.mp4"
     render.concat(parts, out)
-    bed = sfx.music_bed(narrate.duration(out), cfg, vdir / "music.m4a")
+    bed = sfx.music_bed(narrate.duration(out), cfg, vdir / "music.m4a") if t.music else None
     if bed:
         raw = out.with_name(out.stem + ".nomusic.mp4")
         out.rename(raw)
