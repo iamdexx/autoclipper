@@ -224,7 +224,10 @@ def render_narrated(
     for i, (s, ln) in enumerate(cuts):
         vf += f"[0:v]trim=start={s:.3f}:duration={ln:.3f},setpts=PTS-STARTPTS[c{i}];"
         if src_audio:
-            vf += f"[0:a]atrim=start={s:.3f}:duration={ln:.3f},asetpts=PTS-STARTPTS[ca{i}];"
+            vf += (
+                f"[0:a]atrim=start={s:.3f}:duration={ln:.3f},asetpts=PTS-STARTPTS,"
+                f"afade=t=in:d=0.06,afade=t=out:st={max(0.0, ln - 0.08):.3f}:d=0.08[ca{i}];"
+            )
     vf += "".join(f"[c{i}]" for i in range(len(cuts))) + f"concat=n={len(cuts)}:v=1:a=0[src];"
     if src_audio:
         vf += "".join(f"[ca{i}]" for i in range(len(cuts)))
@@ -242,16 +245,18 @@ def render_narrated(
         inputs += ["-i", str(voice)]
         tracks.append("[nar]")
     if sfx:
-        vf += f";[{len(inputs) // 2}:a]aresample=48000,volume=0.7,{pad}[fx]"
+        vf += f";[{len(inputs) // 2}:a]aresample=48000,volume=0.35,{pad}[fx]"
         inputs += ["-i", str(sfx)]
         tracks.append("[fx]")
+    # short fades at both ends so segment joins never click
+    edge = f"afade=t=in:d=0.04,afade=t=out:st={max(0.0, dur - 0.06):.3f}:d=0.06"
     if len(tracks) > 1:
         vf += (
             f";{''.join(tracks)}amix=inputs={len(tracks)}:duration=shortest"
-            f":dropout_transition=0:normalize=0[a]"
+            f":dropout_transition=0:normalize=0,{edge}[a]"
         )
     elif tracks:
-        vf += f";{tracks[0]}acopy[a]"
+        vf += f";{tracks[0]}{edge}[a]"
     else:
         vf += f";anullsrc=r=48000:cl=stereo,atrim=0:{dur:.3f}[a]"
     cmd = ["ffmpeg", "-y", "-loglevel", "error", *inputs, "-filter_complex", vf]

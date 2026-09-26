@@ -272,6 +272,7 @@ def test_ranking_script_parsing_and_prompt(tmp_path, monkeypatch):
     j = {
         "title": "Ranking Insane Moments",
         "tease": "last one is wild",
+        "intro": "Hook.",
         "hashtags": ["#x"],
         "entries": [
             {"rank": 2, "name": "two", "label": "Smooth", "line": "l2", "query": "q2"},
@@ -282,7 +283,7 @@ def test_ranking_script_parsing_and_prompt(tmp_path, monkeypatch):
     monkeypatch.setattr(trends, "_llm", lambda p, c: seen.setdefault("prompt", p) and json.dumps(j))
     s = top10.write_script("things", "", cfg)
     assert "Ranking" in seen["prompt"] and "label" in seen["prompt"]
-    assert s.tease == "last one is wild" and s.intro == ""
+    assert s.tease == "last one is wild" and s.intro == "Hook."
     assert [e.label for e in s.entries] == ["Smooth", "Hell nah"]
 
 

@@ -6,7 +6,7 @@ import re
 from dataclasses import asdict
 from pathlib import Path
 
-from . import ingest, publish, rank, render, top10, trends, verify
+from . import ingest, publish, qa, rank, render, top10, trends, verify
 from .config import Config, Creator
 from .state import State
 
@@ -50,12 +50,16 @@ def process_video(
     log.info("%s: %d moments picked", meta.id, len(moments))
 
     clips: list[Path] = []
+    rejected: list[Path] = []
     for i, m in enumerate(moments, 1):
         out = vdir / "clips" / f"{i:02d}-{_slug(m.hook)}.mp4"
         try:
             render.render_clip(src, m, segments, cfg, out)
         except Exception as e:
             log.error("render failed for moment %d: %s", i, e)
+            continue
+        if not qa.gate(out, cfg, m.narration, kind="clip"):
+            rejected.append(out)
             continue
         clips.append(out)
         if do_publish:
@@ -64,7 +68,12 @@ def process_video(
                 state.record_post(meta.id, out.name, platform, r)
 
     state.mark_video(
-        meta.id, "done", title=meta.title, creator=creator.name, clips=[c.name for c in clips]
+        meta.id,
+        "done",
+        title=meta.title,
+        creator=creator.name,
+        clips=[c.name for c in clips],
+        qa_failed=[c.name for c in rejected],
     )
     return clips
 
@@ -160,6 +169,9 @@ def make_top10(
     except Exception as e:
         log.exception("top10 %r failed: %s", topic, e)
         state.mark_topic("top10", topic, status="error", error=str(e))
+        return None
+    if not qa.gate(out, cfg, top10.narration_text(script), kind="top10"):
+        state.mark_topic("top10", topic, status="qa_failed", video=out.name, title=script.title)
         return None
     state.mark_topic("top10", topic, status="done", video=out.name, title=script.title)
     if do_publish:
