@@ -25,6 +25,14 @@ def process_video(
     vdir.mkdir(parents=True, exist_ok=True)
     (vdir / "meta.json").write_text(json.dumps(asdict(meta), indent=2))
 
+    if meta.live_status in ("is_live", "is_upcoming", "post_live"):
+        log.info(
+            "skipping %s (%s): %s, retry once the VOD is ready",
+            meta.id,
+            meta.title,
+            meta.live_status,
+        )
+        return []
     if meta.duration and not (creator.min_duration_s <= meta.duration <= creator.max_duration_s):
         log.info(
             "skipping %s (%s): duration %.0fs outside window", meta.id, meta.title, meta.duration
@@ -155,7 +163,7 @@ def make_top10(
         return None
     state.mark_topic("top10", topic, status="done", video=out.name, title=script.title)
     if do_publish:
-        res = publish.publish_all(out, script.title, "autoclipper", script.hashtags, cfg)
+        res = publish.publish_all(out, script.title, "", script.hashtags, cfg, kind="top10")
         for platform, r in res.items():
             state.record_post(f"top10:{key}", out.name, platform, r)
     return out

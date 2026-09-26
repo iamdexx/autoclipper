@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import calendar
 import json
 import logging
 import subprocess
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -40,6 +42,7 @@ class VideoMeta:
     duration: float
     creator: str
     uploader: str = ""
+    live_status: str = ""  # is_live | is_upcoming | was_live | not_live | post_live
 
 
 def resolve_channel_id(creator: Creator) -> str:
@@ -64,10 +67,19 @@ def resolve_channel_id(creator: Creator) -> str:
     return cid
 
 
-def latest_video_ids(creator: Creator) -> list[str]:
+def latest_video_ids(creator: Creator, max_age_h: float | None = None) -> list[str]:
+    """Newest first. With max_age_h, uploads published earlier are left out so the first run on a
+    channel doesn't work through its whole back catalogue."""
     cid = resolve_channel_id(creator)
     feed = feedparser.parse(YT_FEED.format(cid=cid))
-    return [e.yt_videoid for e in feed.entries]
+    out = []
+    for e in feed.entries:
+        pub = e.get("published_parsed")
+        if max_age_h is not None and pub is not None:
+            if time.time() - calendar.timegm(pub) > max_age_h * 3600:
+                continue
+        out.append(e.yt_videoid)
+    return out
 
 
 def probe(url: str, creator_name: str) -> VideoMeta:
@@ -80,6 +92,7 @@ def probe(url: str, creator_name: str) -> VideoMeta:
         duration=float(j.get("duration") or 0),
         creator=creator_name,
         uploader=j.get("uploader", ""),
+        live_status=j.get("live_status") or ("is_live" if j.get("is_live") else ""),
     )
 
 
@@ -128,7 +141,7 @@ def new_videos(cfg: Config, seen) -> list[tuple[Creator, str]]:
     found: list[tuple[Creator, str]] = []
     for c in cfg.creators:
         try:
-            ids = latest_video_ids(c)
+            ids = latest_video_ids(c, cfg.max_video_age_h)
         except Exception as e:  # network / bad handle: keep going with other creators
             log.warning("feed failed for %s: %s", c.name, e)
             continue

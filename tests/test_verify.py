@@ -258,6 +258,10 @@ def test_footage_cache_is_per_entry(tmp_path, monkeypatch):
     key = hashlib.sha1(b"old play|q").hexdigest()[:8]
     cached = cached.with_name(f"01-old-play-{key}.mp4")
     cached.write_bytes(b"x")
+    assert top10.fetch_footage(old, 5, tmp_path, cfg) is None  # not a playable video: purged
+    assert not cached.exists()
+    cached.write_bytes(b"x")
+    monkeypatch.setattr(top10, "has_video", lambda p: True)
     assert top10.fetch_footage(old, 5, tmp_path, cfg) == cached
     assert top10.fetch_footage(top10.Entry(1, "new play", "l", "q"), 5, tmp_path, cfg) is None
     assert top10.fetch_footage(top10.Entry(1, "old play", "l", "other q"), 5, tmp_path, cfg) is None

@@ -2,11 +2,13 @@
 
 Credentials (all via environment variables):
   YouTube   : YT_CLIENT_SECRETS (path to OAuth client json) + YT_TOKEN (path where the refresh
-              token is cached; created by `autoclipper auth youtube`).
+              token is cached; created by `autoclipper auth youtube`). On a runner with no disk
+              (GitHub Actions) put the token file's contents in YT_TOKEN_JSON instead.
   TikTok    : TIKTOK_ACCESS_TOKEN  (Content Posting API, scope video.publish).
   Instagram : IG_ACCESS_TOKEN + IG_USER_ID (Graph API, instagram_content_publish) and
               PUBLIC_BASE_URL - Instagram fetches the video from a URL, so clips are served from
-              the `public/` dir (see server.py) or you set PUBLIC_BASE_URL to a bucket/CDN.
+              `<workdir>/public/`, which you must serve yourself at PUBLIC_BASE_URL (a static
+              host, bucket or CDN synced from that dir).
 """
 
 from __future__ import annotations
@@ -39,6 +41,9 @@ def youtube_auth(interactive: bool = True):
     from google_auth_oauthlib.flow import InstalledAppFlow
 
     token_path = Path(os.getenv("YT_TOKEN", "secrets/yt_token.json"))
+    if os.getenv("YT_TOKEN_JSON") and not token_path.exists():
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        token_path.write_text(os.environ["YT_TOKEN_JSON"])
     creds = None
     if token_path.exists():
         creds = Credentials.from_authorized_user_file(str(token_path), YT_SCOPES)
@@ -49,7 +54,7 @@ def youtube_auth(interactive: bool = True):
             raise PublishError("YouTube not authorised: run `autoclipper auth youtube`")
         secrets = os.getenv("YT_CLIENT_SECRETS", "secrets/yt_client_secret.json")
         flow = InstalledAppFlow.from_client_secrets_file(secrets, YT_SCOPES)
-        creds = flow.run_console() if os.getenv("HEADLESS") else flow.run_local_server(port=0)
+        creds = flow.run_local_server(port=0, open_browser=not os.getenv("HEADLESS"))
     token_path.parent.mkdir(parents=True, exist_ok=True)
     token_path.write_text(creds.to_json())
     return creds
@@ -205,12 +210,17 @@ def publish_instagram(video: Path, caption: str, public_dir: Path) -> dict:
 
 
 def publish_all(
-    video: Path, hook: str, creator: str, hashtags: list[str], cfg: Config
+    video: Path, hook: str, creator: str, hashtags: list[str], cfg: Config, kind: str = "clip"
 ) -> dict[str, dict]:
+    """kind: 'clip' (creator/trend clip) or 'top10' (own countdown video) - picks the templates."""
     p = cfg.publishing
     tags = list(dict.fromkeys(p.default_hashtags + hashtags))
-    title = p.title_template.format(hook=hook, creator=creator)
-    caption = p.caption_template.format(hook=hook, creator=creator, hashtags=" ".join(tags))
+    if kind == "top10":
+        title_t, caption_t = p.top10_title_template, p.top10_caption_template
+    else:
+        title_t, caption_t = p.title_template, p.caption_template
+    title = title_t.format(hook=hook, creator=creator)
+    caption = caption_t.format(hook=hook, creator=creator, hashtags=" ".join(tags))
     results: dict[str, dict] = {}
     targets = [("youtube", p.youtube), ("tiktok", p.tiktok), ("instagram", p.instagram)]
     for name, enabled in targets:
@@ -218,7 +228,7 @@ def publish_all(
             continue
         if p.dry_run:
             log.info("[dry-run] would post %s to %s: %s", video.name, name, title)
-            results[name] = {"dry_run": True, "title": title}
+            results[name] = {"dry_run": True, "title": title, "caption": caption}
             continue
         try:
             if name == "youtube":

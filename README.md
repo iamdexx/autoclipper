@@ -105,9 +105,9 @@ Flip `publishing.dry_run: false` and set the credentials for the platforms you w
 
 | Platform | Env vars | How to get |
 | --- | --- | --- |
-| YouTube Shorts | `YT_CLIENT_SECRETS` (OAuth desktop client json), `YT_TOKEN` (cache path) | Google Cloud console -> enable YouTube Data API v3 -> OAuth client (Desktop). Then `autoclipper auth youtube` once. |
+| YouTube Shorts | `YT_CLIENT_SECRETS` (OAuth desktop client json), `YT_TOKEN` (cache path) or `YT_TOKEN_JSON` (the token file's contents, for GitHub Actions) | Google Cloud console -> enable YouTube Data API v3 -> OAuth client (Desktop). Then `autoclipper auth youtube` once on your machine and paste `secrets/yt_token.json` into the `YT_TOKEN_JSON` repo secret. |
 | TikTok | `TIKTOK_ACCESS_TOKEN` | developers.tiktok.com app with Content Posting API, scope `video.publish`. Unaudited apps can only post privately (`TIKTOK_PRIVACY=SELF_ONLY`). |
-| Instagram Reels | `IG_ACCESS_TOKEN`, `IG_USER_ID`, `PUBLIC_BASE_URL` | Meta app with `instagram_content_publish`, IG Business/Creator account linked to a Page. Instagram pulls the file from a URL: serve `data/public/` (e.g. `python -m http.server` behind your domain, or a bucket) and point `PUBLIC_BASE_URL` at it. |
+| Instagram Reels | `IG_ACCESS_TOKEN`, `IG_USER_ID`, `PUBLIC_BASE_URL` | Meta app with `instagram_content_publish`, IG Business/Creator account linked to a Page. Instagram pulls the file from a URL: the clip is copied to `data/public/`, which *you* have to serve at `PUBLIC_BASE_URL` (a bucket/CDN you sync that dir to, or a web server on a VPS). On GitHub Actions there is no such server, so Instagram needs external hosting. |
 
 Posts and processed videos are tracked in `data/state.json` (`autoclipper status`).
 
