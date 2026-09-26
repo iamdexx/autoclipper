@@ -197,7 +197,7 @@ def _probe(path):
     return json.loads(out)["streams"]
 
 
-def test_render_narrated_and_concat(tmp_path):
+def test_render_narrated_and_concat(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
     src = _src(tmp_path)
     voice = tmp_path / "voice.m4a"
@@ -234,13 +234,23 @@ def test_render_narrated_and_concat(tmp_path):
     assert abs(narrate.duration(final) - 10.0) < 0.5
     assert [s["codec_type"] for s in _probe(final)] == ["video", "audio"]
     # one continuous music bed under the whole thing, video stream untouched
+    cfg.top10.music = "synth"
     bed = sfx.music_bed(narrate.duration(final), cfg, tmp_path / "bed.m4a")
     assert bed and abs(narrate.duration(bed) - narrate.duration(final)) < 0.2
     mixed = sfx.mix_under(final, bed, -14.0, tmp_path / "mixed.mp4")
     assert abs(narrate.duration(mixed) - narrate.duration(final)) < 0.3
     assert [s["codec_type"] for s in _probe(mixed)] == ["video", "audio"]
-    cfg.top10.music = False
+    cfg.top10.music = "off"
     assert sfx.music_bed(5.0, cfg, tmp_path / "none.m4a") is None
+    # generated music: falls back to music_dir, then to nothing (never to the synth)
+    cfg.top10.music = "elevenlabs"
+    monkeypatch.setattr(sfx, "generate_music", lambda *a: None)
+    assert sfx.music_bed(5.0, cfg, tmp_path / "none2.m4a") is None
+    cfg.top10.music_dir = str(tmp_path / "tracks")
+    (tmp_path / "tracks").mkdir()
+    (tmp_path / "tracks" / "song.m4a").write_bytes(voice.read_bytes())
+    own = sfx.music_bed(5.0, cfg, tmp_path / "own.m4a")
+    assert own and abs(narrate.duration(own) - 5.0) < 0.2
 
 
 def test_cut_plan():

@@ -96,8 +96,18 @@ class TopTen:
     topics: list[str] = field(default_factory=list)  # fixed ideas; empty = derive from trends
     cuts_per_entry: int = 2  # footage cuts per entry (each with a zoom punch)
     sfx: bool = True  # whoosh/hit on every rank reveal
-    music: bool = True  # one continuous bed under the whole video, start to end
-    music_dir: str = ""  # your own tracks (mp3/m4a/wav); empty = built-in synth pulse
+    # the footage's own audio (crowd, commentary, whatever music the source clip had) under the
+    # narration; kept low so it doesn't sound like the soundtrack changes at every rank
+    source_db: float = -26.0
+    # one continuous bed under the whole video, start to end:
+    # elevenlabs = generated per video (Music API), synth = built-in pulse, off = none;
+    # music_dir tracks are used whenever set (and as fallback if generation fails)
+    music: str = "elevenlabs"
+    music_prompt: str = (
+        "high-energy instrumental for a viral sports/entertainment countdown video, driving "
+        "drums and bass, modern trap-EDM hybrid, 130 bpm, builds tension, no vocals"
+    )
+    music_dir: str = ""  # your own tracks (mp3/m4a/wav)
     music_db: float = -14.0  # bed level relative to the narration
 
 

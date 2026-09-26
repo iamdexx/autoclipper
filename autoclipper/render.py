@@ -185,6 +185,7 @@ def render_narrated(
     cfg: Config,
     out: Path,
     sfx: Path | None = None,
+    duck_db: float | None = None,
 ) -> Path:
     """A segment fully voiced by the narrator (Top-10 entries): source audio stays ducked the
     whole time, captions come from the narration's word timings, badge = big rank number.
@@ -210,7 +211,7 @@ def render_narrated(
         vf += f"concat=n={len(cuts)}:v=0:a=1[srca];"
     vf += _vf(ass_path, "[src]", punch_at)
     inputs = ["-i", str(source)]
-    duck = 10 ** (cfg.narration.duck_db / 20)
+    duck = 10 ** ((cfg.narration.duck_db if duck_db is None else duck_db) / 20)
     pad = f"apad=whole_dur={dur:.3f},atrim=0:{dur:.3f}"
     tracks = []
     if src_audio:

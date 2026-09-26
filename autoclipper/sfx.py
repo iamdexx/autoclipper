@@ -1,16 +1,22 @@
 """Sound design for Top-10 videos: a rank-reveal whoosh/hit and a continuous music bed.
 
-Everything is synthesised with ffmpeg so the repo ships no audio files; drop your own tracks in
-`top10.music_dir` to use real music instead of the built-in pulse.
+The whoosh is synthesised with ffmpeg. Music comes from the ElevenLabs Music API by default
+(one continuous instrumental generated per video, cached), or your own tracks in
+`top10.music_dir`; the ffmpeg synth pulse is an explicit opt-in (`top10.music: synth`).
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import math
 import random
 import subprocess
 from pathlib import Path
 
+import requests
+
+from . import narrate
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -61,22 +67,65 @@ def _synth_bed(dur: float, out: Path) -> Path:
     return out
 
 
-def music_bed(dur: float, cfg: Config, out: Path) -> Path | None:
-    """A bed exactly `dur` long: a random track from top10.music_dir (looped/cut, faded out) or
-    the synth pulse. None if music is disabled."""
+def generate_music(prompt: str, secs: float, cfg: Config, cache: Path) -> Path | None:
+    """One instrumental track from the ElevenLabs Music API (same key as the narrator; needs the
+    `music_generation` permission). Cached per prompt+length so repeat videos reuse it."""
+    key = narrate._elevenlabs_key()
+    if not key:
+        return None
+    ms = int(math.ceil(secs / 15) * 15_000)  # round up to 15s buckets for the cache
+    out = cache / f"{hashlib.sha1(f'{prompt}|{ms}'.encode()).hexdigest()[:12]}.mp3"
+    if out.exists():
+        return out
+    cache.mkdir(parents=True, exist_ok=True)
+    try:
+        r = requests.post(
+            "https://api.elevenlabs.io/v1/music",
+            headers={"xi-api-key": key},
+            json={"prompt": prompt, "music_length_ms": ms},
+            timeout=300,
+        )
+        r.raise_for_status()
+        out.write_bytes(r.content)
+        return out
+    except requests.HTTPError as e:
+        log.warning("elevenlabs music generation failed: %s %s", e, e.response.text[:200])
+        return None
+    except requests.RequestException as e:
+        log.warning("elevenlabs music generation failed: %s", e)
+        return None
+
+
+def music_enabled(cfg: Config) -> bool:
+    return str(cfg.top10.music).lower() not in ("off", "false", "none", "")
+
+
+def music_bed(dur: float, cfg: Config, out: Path, prompt: str = "") -> Path | None:
+    """A bed exactly `dur` long, faded out at the end. Source, in order: a generated track
+    (`top10.music: elevenlabs`), a random file from `top10.music_dir`, the built-in synth pulse
+    (`top10.music: synth`). None if music is off or no source is available."""
     t = cfg.top10
-    if not t.music:
+    mode = str(t.music).lower()
+    if not music_enabled(cfg):
         return None
     out.parent.mkdir(parents=True, exist_ok=True)
-    tracks = []
-    if t.music_dir:
+    track: Path | None = None
+    if mode in ("elevenlabs", "auto", "true"):
+        track = generate_music(
+            prompt or t.music_prompt, dur + 2, cfg, cfg.workdir / "assets" / "music"
+        )
+    if track is None and t.music_dir:
         d = Path(t.music_dir)
         tracks = sorted(p for p in d.glob("*") if p.suffix.lower() in _AUDIO_EXT)
-        if not tracks:
-            log.warning("music_dir %s has no audio files; using the synth bed", d)
-    if not tracks:
-        return _synth_bed(dur, out)
-    track = random.choice(tracks)
+        if tracks:
+            track = random.choice(tracks)
+        else:
+            log.warning("music_dir %s has no audio files", d)
+    if track is None:
+        if mode == "synth":
+            return _synth_bed(dur, out)
+        log.warning("no music source available; rendering without a bed")
+        return None
     _ffmpeg(
         *("-stream_loop", "-1", "-i", str(track), "-t", f"{dur:.3f}"),
         *(

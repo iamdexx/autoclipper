@@ -281,12 +281,16 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
         cuts = render.cut_plan(avail, min(dur, max(1.0, avail)), t.cuts_per_entry)
         if not badge:
             cuts = cuts[::-1]
-        render.render_narrated(src, cuts, voice, words, title, badge, cfg, seg, sfx=whoosh)
+        render.render_narrated(
+            src, cuts, voice, words, title, badge, cfg, seg, sfx=whoosh, duck_db=t.source_db
+        )
         parts.append(seg)
 
     out = vdir / f"{_slug(script.title)}.mp4"
     render.concat(parts, out)
-    bed = sfx.music_bed(narrate.duration(out), cfg, vdir / "music.m4a") if t.music else None
+    bed = None
+    if sfx.music_enabled(cfg):
+        bed = sfx.music_bed(narrate.duration(out), cfg, vdir / "music.m4a")
     if bed:
         raw = out.with_name(out.stem + ".nomusic.mp4")
         out.rename(raw)

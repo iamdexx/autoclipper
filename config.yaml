@@ -54,8 +54,10 @@ top10:
   item_min_s: 3.5
   cuts_per_entry: 2     # footage cuts per entry, each with a zoom punch
   sfx: true             # whoosh/hit on every rank reveal
-  music: true           # one continuous bed under the whole video (never starts mid-list)
-  music_dir: ""         # folder of your own royalty-free tracks; empty = built-in synth pulse
+  source_db: -26        # footage's own audio under the narration (-100 = effectively mute)
+  music: elevenlabs     # one continuous bed, start to end: elevenlabs (Music API, needs the
+                        # music_generation permission on your key) | synth | off
+  music_dir: ""         # folder of your own tracks; used if set / if generation fails
   music_db: -14         # bed level relative to the narration
   topics: []            # fixed ideas e.g. ["craziest NFL plays this week"]; empty = from trends
 

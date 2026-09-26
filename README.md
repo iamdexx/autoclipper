@@ -81,9 +81,11 @@ would be picked; add `--clip` to actually make the clips.
 - pacing: `top10.cuts_per_entry` (default 2) footage cuts per entry, each with a zoom punch,
   and a whoosh/hit on every rank reveal (`top10.sfx`)
 - segments are concatenated into one MP4 in `data/top10/<slug>/`, then one continuous music
-  bed runs under the whole video start to finish (`top10.music`, level `top10.music_db`).
-  Default is a minimal synthesised pulse; point `top10.music_dir` at a folder of your own
-  royalty-free tracks and one is picked at random, looped/cut to length and faded out.
+  bed runs under the whole video start to finish (level `top10.music_db`). `top10.music:
+  elevenlabs` (default) generates an instrumental per video with the ElevenLabs Music API
+  (`top10.music_prompt`; your key needs the `music_generation` permission; cached in
+  `data/assets/music/`). `top10.music_dir` = folder of your own tracks (random pick, looped/cut,
+  faded; also the fallback if generation fails). `synth` = built-in ffmpeg pulse, `off` = none.
 
 ## Fact-check gate (`verify:`)
 
