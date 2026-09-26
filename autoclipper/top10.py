@@ -162,7 +162,8 @@ def fact_check(script: Script, cfg: Config) -> list[verify.Check]:
         if not verify.passes(c, cfg):
             log.warning("intro rejected, dropping it: %r / %r", script.title, script.intro)
             script.intro = ""
-            script.title = f"Top {len(script.entries)} {script.topic}".strip()
+            if cfg.top10.style != "ranking":  # ranking's title is the banner, not the hook
+                script.title = f"Top {len(script.entries)} {script.topic}".strip()
     return checks
 
 
@@ -403,7 +404,7 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
         segments.append((e.line, e.name, f"#{e.rank}", e))
     labels = [(e.rank, e.label or e.name) for e in script.entries]
 
-    whoosh = sfx.whoosh(cfg.workdir / "assets" / "whoosh.m4a") if t.sfx else None
+    whoosh = sfx.whoosh(cfg.workdir / "assets" / "reveal.m4a") if t.sfx else None
     for i, (text, title, badge, entry) in enumerate(segments):
         seg = vdir / "segments" / f"{i:02d}.mp4"
         voiced = None

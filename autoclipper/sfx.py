@@ -29,17 +29,18 @@ def _ffmpeg(*args: str) -> None:
 
 
 def whoosh(out: Path) -> Path:
-    """0.5s: a filtered-noise sweep into a short sub 'hit' - the sound of a rank appearing."""
+    """0.4s: a soft, band-limited air sweep with a faint low thump - the sound of a rank
+    appearing. Deliberately muted so it reads as a transition, not a hit."""
     if out.exists():
         return out
     out.parent.mkdir(parents=True, exist_ok=True)
     graph = (
-        "anoisesrc=color=pink:amplitude=0.45:d=0.45,highpass=f=900,"
-        "afade=t=in:d=0.15,afade=t=out:st=0.25:d=0.2[sw];"
-        "sine=f=55:d=0.35,afade=t=out:d=0.35,volume=1.6[hit];"
-        "[hit]adelay=280|280[hitd];"
+        "anoisesrc=color=brown:amplitude=0.5:d=0.4,highpass=f=300,lowpass=f=2200,"
+        "afade=t=in:d=0.18:curve=qsin,afade=t=out:st=0.2:d=0.2:curve=qsin[sw];"
+        "sine=f=60:d=0.3,afade=t=in:d=0.03,afade=t=out:st=0.05:d=0.25,volume=0.5[hit];"
+        "[hit]adelay=200|200[hitd];"
         "[sw][hitd]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,"
-        "aformat=channel_layouts=stereo,volume=6,alimiter=limit=0.85"
+        "aformat=channel_layouts=stereo,volume=2.2,alimiter=limit=0.6"
     )
     _ffmpeg("-filter_complex", graph, "-ar", "48000", "-c:a", "aac", "-b:a", "128k", str(out))
     return out

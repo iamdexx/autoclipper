@@ -233,6 +233,7 @@ def test_factcheck_cli_exit_code(tmp_path, monkeypatch):
 
 def test_intro_is_checked_and_dropped(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
+    cfg.top10.style = "countdown"
     seen = {}
 
     def fake(claims, c):

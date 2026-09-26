@@ -152,6 +152,8 @@ verdict rules:
   same people/topic in that period (a real thing would have left a trace)
 - "unverifiable": evidence is unrelated or too thin to say either way
 Be skeptical of superlatives and very specific numbers. Never use your own memory as a source.
+Judge only the factual content: obvious hype / figurative wording ("defied physics", "broke the
+internet", "insane") is not a claim and must not by itself make something unsupported.
 
 Return ONLY a JSON array with one object per claim, same order:
 [{{"i": <claim index>, "verdict": "supported|unsupported|unverifiable", "confidence": <0-1>,
