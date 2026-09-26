@@ -119,7 +119,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         lines.append(f"Dialogue: 0,{_ts(0)},{_ts(min(dur, hook_secs))},Hook,,0,0,0,,{hook_text}")
     if one_word:
         for k, w in enumerate(words):
-            we = words[k + 1].start if k + 1 < len(words) else max(w.end, w.start + 0.3)
+            # hold until the next word, but never through a long pause
+            nxt = words[k + 1].start if k + 1 < len(words) else w.end + 0.6
+            we = min(nxt, max(w.start + 0.3, w.end + 0.6))  # never overlaps the next word
             if we > w.start:
                 txt = _esc(w.text.strip(".,!?;:").upper())
                 lines.append(f"Dialogue: 0,{_ts(w.start)},{_ts(we)},Word,,0,0,0,,{txt}")
@@ -310,10 +312,10 @@ def render_still(
     zoom_in: bool = True,
 ) -> Path:
     """One listicle item: a still photo with a slow Ken Burns zoom (in or out) over a blurred
-    fill, one word on screen at a time, narration as the only audio."""
+    fill, captions in the global style, narration as the only audio."""
     out.parent.mkdir(parents=True, exist_ok=True)
     ass_path = out.with_suffix(".ass")
-    ass_path.write_text(build_ass(words, "", dur, cfg, badge="", one_word=True))
+    ass_path.write_text(build_ass(words, "", dur, cfg, badge=""))
     frames = max(1, round(dur * FPS))
     z = f"1+0.12*on/{frames}" if zoom_in else f"1.12-0.12*on/{frames}"
     # the composite is built at 2x and zoompan downsamples it, which keeps the slow zoom smooth
@@ -355,11 +357,18 @@ def render_clip(
     out.parent.mkdir(parents=True, exist_ok=True)
     dur = moment.end - moment.start
 
+    # the narrator's hook is its own intro: the clip's first frame is held and its audio
+    # silent while he speaks, captions follow his words; then the clip plays with its own
+    # words captioned - one voice at a time, like every other format
     voice = None
+    voice_words: list[Word] = []
     voice_len = 0.0
     tempo = 1.0
+    lead = 0.25
     if _has_audio(source):
-        voice = narrate.synthesize(moment.narration, cfg, out.with_suffix(".voice.m4a"))
+        timed = narrate.synthesize_timed(moment.narration, cfg, out.with_suffix(".voice.m4a"))
+        if timed:
+            voice, voice_words = timed
     if voice:
         voice_len = narrate.duration(voice)
         if voice_len > cfg.narration.max_len_s:
@@ -367,34 +376,38 @@ def render_clip(
             voice_len /= tempo
         if voice_len > dur / 2:
             log.warning("narration %.1fs too long for %.1fs clip, skipping", voice_len, dur)
-            voice, voice_len, tempo = None, 0.0, 1.0
+            voice, voice_words, voice_len, tempo = None, [], 0.0, 1.0
+    intro = voice_len + lead + 0.3 if voice else 0.0
+    total = dur + intro
 
+    words = [Word(w.start / tempo + lead, w.end / tempo + lead, w.text) for w in voice_words]
+    words += [
+        Word(w.start + intro, w.end + intro, w.text)
+        for w in words_in(segments, moment.start, moment.end)
+    ]
     ass_path = out.with_suffix(".ass")
-    ass_path.write_text(
-        build_ass(
-            words_in(segments, moment.start, moment.end),
-            moment.hook,
-            dur,
-            cfg,
-            hook_secs=max(4.0, voice_len + 0.5),
-        )
-    )
+    ass_path.write_text(build_ass(words, moment.hook, total, cfg, hook_secs=intro or 4.0))
 
+    # the intro shows the footage leading into the moment (muted) when there is enough of it,
+    # otherwise the first frame is held
+    pre = min(intro, moment.start)
+    hold = intro - pre
     vf = _vf(ass_path)
-    inputs = ["-ss", f"{moment.start:.3f}", "-t", f"{dur:.3f}", "-i", str(source)]
+    if hold > 0.01:
+        vf = f"[0:v]tpad=start_duration={hold:.3f}[hv];" + _vf(ass_path, src="[hv]")
+    inputs = ["-ss", f"{moment.start - pre:.3f}", "-t", f"{dur + pre:.3f}", "-i", str(source)]
     audio_map: list[str] = []
     if _has_audio(source):
         audio_map = ["-map", "[a]"]
         if not voice:
             vf += f";[0:a]{NORM}[a]"
     if voice:
-        duck = 10 ** (cfg.narration.duck_db / 20)
-        lead = 0.25
+        ms = int(hold * 1000)
         vf += (
-            f";[0:a]volume={duck:.3f}:enable='lt(t,{voice_len + lead + 0.3:.2f})'[duck];"
+            f";[0:a]volume=0:enable='lt(t,{pre:.3f})',adelay={ms}|{ms},aresample=48000[held];"
             f"[1:a]atempo={tempo:.3f},adelay={int(lead * 1000)}|{int(lead * 1000)},"
             f"aresample=48000,apad[nar];"
-            f"[duck][nar]amix=inputs=2:duration=first:dropout_transition=0,{NORM}[a]"
+            f"[held][nar]amix=inputs=2:duration=first:dropout_transition=0,{NORM}[a]"
         )
         inputs += ["-i", str(voice)]
     cmd = [
