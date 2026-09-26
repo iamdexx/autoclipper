@@ -31,7 +31,11 @@ publishing:
   instagram: true
 
 narration:
-  provider: auto        # auto | gemini | elevenlabs | openai | off
+  provider: auto        # auto = azure > google > elevenlabs > gemini > openai, next one when a call fails | off
+  azure_voice: en-US-AndrewMultilingualNeural  # Brian/Davis/Guy/Steffan/Christopher ...
+  azure_rate: 1.05
+  google_voice: Charon  # Cloud TTS Chirp 3 HD: Fenrir, Orus, Puck, Algenib, Iapetus ...
+  google_rate: 1.0
   gemini_voice: Puck    # Kore, Charon, Fenrir, Aoede, Leda ...
   duck_db: -14
   max_len_s: 6

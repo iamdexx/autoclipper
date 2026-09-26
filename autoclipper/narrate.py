@@ -3,17 +3,26 @@
 The ranker's `hook` becomes a 1-2 sentence narrator line, voiced by a natural TTS voice and
 mixed over the first seconds of the clip with the stream audio ducked underneath.
 
-Providers (config `narration.provider`, `auto` picks the first available):
+Providers (config `narration.provider`; `auto` tries them in this order and moves on to the
+next one when a call fails, e.g. a monthly quota running out):
+  azure      : AZURE_SPEECH_KEY + AZURE_SPEECH_REGION (Neural TTS; 500k chars/month free)
+  google     : GOOGLE_TTS_API_KEY  (Cloud Text-to-Speech Chirp 3 HD; 1M chars/month free)
   elevenlabs : ELEVENLABS_API_KEY  (most natural; free tier 10k chars/month)
   gemini     : GEMINI_API_KEY      (Gemini TTS, prebuilt voices like Puck / Kore / Charon)
   openai     : OPENAI_API_KEY      (tts-1-hd, voices alloy/echo/nova/...)
+
+Word timings for the captions come straight from ElevenLabs; for every other provider the
+narration is run through Whisper and aligned to the script, so the highlight follows the voice
+the same way whichever provider spoke.
 """
 
 from __future__ import annotations
 
 import base64
+import difflib
 import logging
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -23,6 +32,8 @@ from .config import Config
 from .ingest import Word
 
 log = logging.getLogger(__name__)
+
+PROVIDERS = ("azure", "google", "elevenlabs", "gemini", "openai")
 
 # lower stability + higher style = more expressive, "hyped" delivery (still Liam)
 _VOICE_SETTINGS = {
@@ -49,19 +60,95 @@ def _elevenlabs_key() -> str | None:
     return None
 
 
-def pick_provider(cfg: Config) -> str | None:
+def _google_key() -> str | None:
+    for name in ("GOOGLE_TTS_API_KEY", "GOOGLE_CLOUD_API_KEY"):
+        if os.getenv(name):
+            return os.getenv(name)
+    return None
+
+
+def _azure_key() -> str | None:
+    return os.getenv("AZURE_SPEECH_KEY") or None
+
+
+def _azure_region() -> str:
+    return os.getenv("AZURE_SPEECH_REGION", "eastus")
+
+
+_KEYS = {
+    "azure": _azure_key,
+    "google": _google_key,
+    "elevenlabs": _elevenlabs_key,
+    "gemini": _gemini_key,
+    "openai": lambda: os.getenv("OPENAI_API_KEY"),
+}
+
+
+def providers(cfg: Config) -> list[str]:
+    """Providers to try, in order: the configured one, or every one with a key for `auto`."""
     p = cfg.narration.provider
     if p == "off":
-        return None
+        return []
     if p != "auto":
-        return p
-    if _elevenlabs_key():
-        return "elevenlabs"
-    if _gemini_key():
-        return "gemini"
-    if os.getenv("OPENAI_API_KEY"):
-        return "openai"
-    return None
+        return [p]
+    return [name for name in PROVIDERS if _KEYS[name]()]
+
+
+def pick_provider(cfg: Config) -> str | None:
+    found = providers(cfg)
+    return found[0] if found else None
+
+
+def tts_azure(text: str, voice: str, rate: float, style: str, out: Path) -> Path:
+    """Azure Speech neural voice (`voice` is the short name, e.g. en-US-AndrewMultilingualNeural).
+    `style` (excited, cheerful, ...) is applied when the voice supports it; ignored otherwise."""
+    body = _esc_xml(text)
+    if rate != 1.0:
+        body = f"<prosody rate='{rate:.2f}'>{body}</prosody>"
+    if style:
+        body = f"<mstts:express-as style='{style}'>{body}</mstts:express-as>"
+    ssml = (
+        "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' "
+        "xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='en-US'>"
+        f"<voice name='{voice}'>{body}</voice></speak>"
+    )
+    r = requests.post(
+        f"https://{_azure_region()}.tts.speech.microsoft.com/cognitiveservices/v1",
+        headers={
+            "Ocp-Apim-Subscription-Key": _azure_key(),
+            "Content-Type": "application/ssml+xml",
+            "X-Microsoft-OutputFormat": "audio-24khz-96kbitrate-mono-mp3",
+            "User-Agent": "autoclipper",
+        },
+        data=ssml.encode(),
+        timeout=120,
+    )
+    r.raise_for_status()
+    mp3 = out.with_suffix(".mp3")
+    mp3.write_bytes(r.content)
+    return _mp3_to_aac(mp3, out)
+
+
+def _esc_xml(s: str) -> str:
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def tts_google(text: str, voice: str, rate: float, out: Path) -> Path:
+    """Cloud Text-to-Speech, Chirp 3 HD voice (`voice` is the short name, e.g. Charon)."""
+    r = requests.post(
+        "https://texttospeech.googleapis.com/v1/text:synthesize",
+        headers={"x-goog-api-key": _google_key()},
+        json={
+            "input": {"text": text},
+            "voice": {"languageCode": "en-US", "name": f"en-US-Chirp3-HD-{voice}"},
+            "audioConfig": {"audioEncoding": "MP3", "speakingRate": rate},
+        },
+        timeout=120,
+    )
+    r.raise_for_status()
+    mp3 = out.with_suffix(".mp3")
+    mp3.write_bytes(base64.b64decode(r.json()["audioContent"]))
+    return _mp3_to_aac(mp3, out)
 
 
 def tts_gemini(text: str, voice: str, out: Path) -> Path:
@@ -182,21 +269,71 @@ def even_words(text: str, dur: float) -> list[Word]:
     return [Word(i * step, (i + 1) * step, t) for i, t in enumerate(toks)]
 
 
+def _norm(tok: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", tok.lower())
+
+
+def align_words(text: str, heard: list[Word], dur: float) -> list[Word]:
+    """Give every script word a timing from what Whisper heard in the narration: matched words
+    take the heard timing, the rest are spread evenly between their timed neighbours."""
+    toks = text.split()
+    if not toks:
+        return []
+    if not heard:
+        return even_words(text, dur)
+    sm = difflib.SequenceMatcher(None, [_norm(t) for t in toks], [_norm(w.text) for w in heard])
+    timed: list[tuple[float, float] | None] = [None] * len(toks)
+    for a, b, n in sm.get_matching_blocks():
+        for k in range(n):
+            timed[a + k] = (heard[b + k].start, heard[b + k].end)
+    if not any(timed):
+        return even_words(text, dur)
+    words: list[Word] = []
+    i = 0
+    while i < len(toks):
+        if timed[i]:
+            words.append(Word(timed[i][0], timed[i][1], toks[i]))
+            i += 1
+            continue
+        j = i
+        while j < len(toks) and not timed[j]:
+            j += 1
+        lo = words[-1].end if words else 0.0
+        hi = timed[j][0] if j < len(toks) else max(dur, lo + 0.3 * (j - i))
+        step = max(hi - lo, 0.05 * (j - i)) / (j - i)
+        for k in range(i, j):
+            words.append(Word(lo + (k - i) * step, lo + (k - i + 1) * step, toks[k]))
+        i = j
+    return words
+
+
+def _heard(voice: Path, cfg: Config) -> list[Word]:
+    from . import ingest
+
+    try:
+        segs = ingest.transcribe(voice, cfg, voice.with_suffix(".words.json"))
+    except Exception as e:
+        log.warning("could not align narration with whisper (%s); spreading words evenly", e)
+        return []
+    return [w for s in segs for w in s.words]
+
+
 def synthesize_timed(text: str, cfg: Config, out: Path) -> tuple[Path, list[Word]] | None:
-    """Narration plus word timings; exact from ElevenLabs, estimated for other providers."""
-    provider = pick_provider(cfg)
-    if not provider or not text.strip():
+    """Narration plus word timings: exact from ElevenLabs, Whisper-aligned for other providers."""
+    if not text.strip():
         return None
     out.parent.mkdir(parents=True, exist_ok=True)
-    if provider == "elevenlabs":
+    for provider in providers(cfg):
         try:
-            return tts_elevenlabs_timed(text, cfg.narration.elevenlabs_voice, out)
+            if provider == "elevenlabs":
+                return tts_elevenlabs_timed(text, cfg.narration.elevenlabs_voice, out)
+            voice = _tts(provider, text, cfg, out)
         except Exception as e:
-            log.warning("elevenlabs timed narration failed (%s); retrying without timings", e)
-    voice = synthesize(text, cfg, out)
-    if not voice:
-        return None
-    return voice, even_words(text, duration(voice))
+            log.warning("narration with %s failed: %s", provider, e)
+            continue
+        out.with_suffix(".words.json").unlink(missing_ok=True)
+        return voice, align_words(text, _heard(voice, cfg), duration(voice))
+    return None
 
 
 def tts_openai(text: str, voice: str, out: Path) -> Path:
@@ -209,21 +346,30 @@ def tts_openai(text: str, voice: str, out: Path) -> Path:
     return out
 
 
-def synthesize(text: str, cfg: Config, out: Path) -> Path | None:
-    provider = pick_provider(cfg)
-    if not provider or not text.strip():
-        return None
+def _tts(provider: str, text: str, cfg: Config, out: Path) -> Path:
     n = cfg.narration
+    if provider == "azure":
+        return tts_azure(text, n.azure_voice, n.azure_rate, n.azure_style, out)
+    if provider == "google":
+        return tts_google(text, n.google_voice, n.google_rate, out)
+    if provider == "elevenlabs":
+        return tts_elevenlabs(text, n.elevenlabs_voice, out)
+    if provider == "gemini":
+        return tts_gemini(text, n.gemini_voice, out)
+    if provider == "openai":
+        return tts_openai(text, n.openai_voice, out)
+    raise ValueError(f"unknown narration provider {provider!r}")
+
+
+def synthesize(text: str, cfg: Config, out: Path) -> Path | None:
+    if not text.strip():
+        return None
     out.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        if provider == "elevenlabs":
-            return tts_elevenlabs(text, n.elevenlabs_voice, out)
-        if provider == "gemini":
-            return tts_gemini(text, n.gemini_voice, out)
-        if provider == "openai":
-            return tts_openai(text, n.openai_voice, out)
-    except Exception as e:
-        log.warning("narration with %s failed: %s", provider, e)
+    for provider in providers(cfg):
+        try:
+            return _tts(provider, text, cfg, out)
+        except Exception as e:
+            log.warning("narration with %s failed: %s", provider, e)
     return None
 
 

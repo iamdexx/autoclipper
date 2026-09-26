@@ -97,7 +97,7 @@ def test_render_mixes_narration(tmp_path, monkeypatch):
     cfg.narration.max_len_s = 1.0
     src = _src(tmp_path)
 
-    def fake_tts(text, cfg_, out):
+    def fake_tts(text, voice, out):
         # 2s of a 1 kHz tone stands in for the narrator; longer than max_len so tempo kicks in
         subprocess.check_call(
             ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=1000",
@@ -105,7 +105,8 @@ def test_render_mixes_narration(tmp_path, monkeypatch):
         )  # fmt: skip
         return out
 
-    monkeypatch.setattr(narrate, "synthesize", fake_tts)
+    monkeypatch.setattr(narrate, "tts_gemini", fake_tts)
+    monkeypatch.setattr(narrate, "_heard", lambda voice, cfg_: [])  # a tone has no words to hear
     m = Moment(0.0, 6.0, "TEST HOOK", "r", 1.0, narration="wait for it")
     out = render.render_clip(src, m, _segments(4), cfg, tmp_path / "clip.mp4")
     streams = subprocess.check_output(
@@ -136,8 +137,80 @@ def test_narration_provider_selection(monkeypatch):
     assert narrate.pick_provider(cfg) == "gemini"
     monkeypatch.setenv("ELEVENLABS_API_KEY", "x")
     assert narrate.pick_provider(cfg) == "elevenlabs"
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "x")
+    monkeypatch.setenv("AZURE_SPEECH_KEY", "x")
+    assert narrate.providers(cfg) == ["azure", "google", "elevenlabs", "gemini"]
+    cfg.narration.provider = "google"
+    assert narrate.providers(cfg) == ["google"]
     cfg.narration.provider = "off"
     assert narrate.pick_provider(cfg) is None
+
+
+def test_narration_falls_through_to_the_next_provider(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    for k in ("GOOGLE_TTS_API_KEY", "GOOGLE_CLOUD_API_KEY", "AZURE_SPEECH_KEY", "OPENAI_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("AZURE_SPEECH_KEY", "x")
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "x")
+    cfg.narration.provider = "auto"
+    calls = []
+
+    def azure(*a):
+        calls.append("azure")
+        raise RuntimeError("quota exceeded")
+
+    def google(text, voice, rate, out):
+        calls.append("google")
+        out.write_bytes(b"x")
+        return out
+
+    monkeypatch.setattr(narrate, "tts_azure", azure)
+    monkeypatch.setattr(narrate, "tts_google", google)
+    assert narrate.synthesize("hi there", cfg, tmp_path / "v.m4a") == tmp_path / "v.m4a"
+    assert calls == ["azure", "google"]
+
+
+def test_timed_narration_tries_each_provider_once(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    for k in ("GOOGLE_TTS_API_KEY", "GOOGLE_CLOUD_API_KEY", "AZURE_SPEECH_KEY", "OPENAI_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "x")
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    cfg.narration.provider = "auto"
+    calls = []
+
+    def eleven_timed(*a):
+        calls.append("elevenlabs")
+        raise RuntimeError("quota_exceeded")
+
+    def gemini(text, voice, out):
+        calls.append("gemini")
+        out.write_bytes(b"x")
+        return out
+
+    monkeypatch.setattr(narrate, "tts_elevenlabs_timed", eleven_timed)
+    monkeypatch.setattr(narrate, "tts_elevenlabs", lambda *a: calls.append("elevenlabs-plain"))
+    monkeypatch.setattr(narrate, "tts_gemini", gemini)
+    monkeypatch.setattr(narrate, "_heard", lambda voice, cfg: [])
+    monkeypatch.setattr(narrate, "duration", lambda p: 1.0)
+    got = narrate.synthesize_timed("hi there", cfg, tmp_path / "v.m4a")
+    assert got is not None and got[0] == tmp_path / "v.m4a"
+    assert [w.text for w in got[1]] == ["hi", "there"]  # evenly spread when whisper hears nothing
+    assert calls == ["elevenlabs", "gemini"]
+
+
+def test_align_words_follows_what_whisper_heard():
+    script = "Imagine getting fired from the company you built."
+    heard = [Word(0.1, 0.5, "Imagine"), Word(0.5, 0.9, "getting"), Word(0.9, 1.2, "fired"),
+             Word(1.6, 1.8, "you"), Word(1.8, 2.3, "built.")]  # fmt: skip
+    words = narrate.align_words(script, heard, 2.5)
+    assert [w.text for w in words] == script.split()
+    assert (words[0].start, words[2].end) == (0.1, 1.2)  # matched words keep heard timing
+    assert words[3].start == 1.2 and words[5].end <= 1.6  # the unheard run fills the gap
+    assert words[-1].end == 2.3
+    assert all(b.start >= a.start for a, b in zip(words, words[1:], strict=False))
+    # nothing heard: even spread
+    assert len(narrate.align_words(script, [], 2.5)) == 8
 
 
 def test_captions_never_merge_narrator_and_clip_words(tmp_path):

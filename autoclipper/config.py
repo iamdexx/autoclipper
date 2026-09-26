@@ -41,7 +41,12 @@ class CaptionStyle:
 
 @dataclass
 class Narration:
-    provider: str = "auto"  # auto | elevenlabs | gemini | openai | off
+    provider: str = "auto"  # auto | azure | google | elevenlabs | gemini | openai | off
+    azure_voice: str = "en-US-AndrewMultilingualNeural"  # Brian/Davis/Guy/Steffan... Neural
+    azure_rate: float = 1.05
+    azure_style: str = ""  # e.g. excited / cheerful, only on voices that list the style
+    google_voice: str = "Charon"  # Chirp 3 HD short name; also Fenrir, Orus, Puck, Algenib ...
+    google_rate: float = 1.0  # 0.25-2.0 speaking pace
     gemini_voice: str = "Puck"
     elevenlabs_voice: str = "TX3LPaxmHKxFdv7VOQHJ"  # "Liam"
     openai_voice: str = "onyx"
