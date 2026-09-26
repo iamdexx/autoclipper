@@ -184,8 +184,7 @@ def synthesize_timed(text: str, cfg: Config, out: Path) -> tuple[Path, list[Word
         try:
             return tts_elevenlabs_timed(text, cfg.narration.elevenlabs_voice, out)
         except Exception as e:
-            log.warning("elevenlabs timed narration failed: %s", e)
-            return None
+            log.warning("elevenlabs timed narration failed (%s); retrying without timings", e)
     voice = synthesize(text, cfg, out)
     if not voice:
         return None

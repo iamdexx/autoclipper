@@ -133,3 +133,74 @@ def test_narration_provider_selection(monkeypatch):
     assert narrate.pick_provider(cfg) == "elevenlabs"
     cfg.narration.provider = "off"
     assert narrate.pick_provider(cfg) is None
+
+
+def test_top10_build_drops_entries_without_footage(tmp_path, monkeypatch):
+    import pytest
+
+    from autoclipper import top10
+
+    cfg = _cfg(tmp_path)
+    cfg.verify.min_entries = 3
+    cfg.top10.items = 4
+    script = top10.Script(
+        topic="plays",
+        title="Top 4 plays of the week",
+        intro="",
+        entries=[top10.Entry(4 - i, f"play {i}", f"line {i}", f"q{i}") for i in range(4)],
+    )
+    src = _src(tmp_path)
+
+    def fake_fetch(entry, secs, dest, cfg):
+        return None if entry.name == "play 1" else src
+
+    monkeypatch.setattr(top10, "fetch_footage", fake_fetch)
+    rendered = []
+
+    def fake_render(src, start, dur, voice, words, title, badge, cfg, out):
+        rendered.append(badge)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"x")
+
+    monkeypatch.setattr(top10.render, "render_narrated", fake_render)
+    monkeypatch.setattr(top10.render, "concat", lambda parts, out: out)
+
+    top10.build(script, cfg, tmp_path / "t")
+    assert [e.name for e in script.entries] == ["play 0", "play 2", "play 3"]
+    assert [e.rank for e in script.entries] == [3, 2, 1]
+    assert script.title == "Top 3 plays of the week"
+    assert rendered == ["#3", "#2", "#1"]
+    saved = json.loads((tmp_path / "t" / "script.json").read_text())
+    assert len(saved["entries"]) == 3
+
+    monkeypatch.setattr(top10, "fetch_footage", lambda *a: None)
+    with pytest.raises(RuntimeError):
+        top10.build(script, cfg, tmp_path / "t2")
+
+
+def test_live_streams_are_not_processed(tmp_path, monkeypatch):
+    from autoclipper import ingest, pipeline
+    from autoclipper.state import State
+
+    cfg = _cfg(tmp_path)
+    meta = ingest.VideoMeta("live1", "u", "live now", 0, "c", live_status="is_live")
+    monkeypatch.setattr(ingest, "probe", lambda url, name: meta)
+    monkeypatch.setattr(ingest, "download", lambda *a: pytest_fail("downloaded a live stream"))
+    st = State(tmp_path / "state.json")
+    assert pipeline.process_video("u", cfg.creators[0], cfg, st) == []
+    assert not st.seen("live1")  # retried once the VOD exists
+
+
+def pytest_fail(msg):
+    raise AssertionError(msg)
+
+
+def test_publish_top10_templates(tmp_path):
+    from autoclipper import publish
+
+    cfg = _cfg(tmp_path)
+    cfg.publishing.dry_run = True
+    cfg.publishing.youtube = True
+    res = publish.publish_all(tmp_path / "v.mp4", "Top 10 plays", "", ["#nfl"], cfg, kind="top10")
+    assert res["youtube"]["title"] == "Top 10 plays #shorts"
+    assert "clip from" not in res["youtube"]["caption"]

@@ -169,12 +169,28 @@ def footage_matches(entry: Entry, title: str) -> bool:
     return bool(q) and len(q & t) >= max(2, (len(q) * 2) // 3)
 
 
+def has_video(path: Path) -> bool:
+    """A partial download (e.g. a 403 mid-stream) can leave an audio-only or empty file."""
+    try:
+        out = subprocess.check_output(
+            ["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries",
+             "stream=codec_type", "-of", "csv=p=0", str(path)],
+            text=True,
+            timeout=60,
+        )  # fmt: skip
+    except Exception:
+        return False
+    return "video" in out
+
+
 def fetch_footage(entry: Entry, secs: float, dest: Path, cfg: Config) -> Path | None:
     """Download only a `secs`-long window from the best-matching video (yt-dlp sections)."""
     key = hashlib.sha1(f"{entry.name}|{entry.query}".encode()).hexdigest()[:8]
     out = dest / f"{entry.rank:02d}-{_slug(entry.name)[:30]}-{key}.mp4"
     if out.exists():
-        return out
+        if has_video(out):
+            return out
+        out.unlink()
     try:
         cands = [
             c
@@ -204,10 +220,12 @@ def fetch_footage(entry: Entry, secs: float, dest: Path, cfg: Config) -> Path | 
             c.url,
         ]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        if r.returncode == 0 and out.exists():
+        if r.returncode == 0 and out.exists() and has_video(out):
             entry.video_id = c.id
             return out
         log.warning("download failed for %s: %s", c.id, r.stderr[-200:])
+        for leftover in dest.glob(out.stem + "*"):
+            leftover.unlink()
     return None
 
 
@@ -216,6 +234,25 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
     vdir.mkdir(parents=True, exist_ok=True)
     (vdir / "script.json").write_text(json.dumps(asdict(script), indent=2))
     parts: list[Path] = []
+
+    # footage first: entries with nothing relevant on YouTube are dropped and the countdown is
+    # renumbered, so the badges always run N..1 with no holes
+    footage: dict[int, Path] = {}
+    for e in script.entries:
+        f = fetch_footage(e, t.item_max_s + 3, vdir / "footage", cfg)
+        if f is None:
+            log.warning("no footage for #%d %s; dropping it", e.rank, e.name)
+        else:
+            footage[id(e)] = f
+    script.entries = [e for e in script.entries if id(e) in footage]
+    if len(script.entries) < max(3, cfg.verify.min_entries if cfg.verify.enabled else 3):
+        raise RuntimeError(f"only {len(script.entries)} entries with footage for {script.title!r}")
+    n = len(script.entries)
+    for i, e in enumerate(script.entries):
+        e.rank = n - i
+    if n != t.items:  # "Top 10 ..." must not promise more than the video shows
+        script.title = re.sub(rf"\b{t.items}\b", str(n), script.title, count=1)
+    (vdir / "script.json").write_text(json.dumps(asdict(script), indent=2))
 
     # intro + entries share one loop; the intro rides on the first entry's footage
     segments: list[tuple[str, str, str, Entry]] = []
@@ -233,18 +270,13 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
         else:
             voice, words = None, narrate.even_words(text, t.item_min_s)
             dur = t.item_min_s
-        footage = fetch_footage(entry, max(dur, t.item_max_s) + 3, vdir / "footage", cfg)
-        if footage is None:
-            log.warning("no footage for #%d %s; skipping", entry.rank, entry.name)
-            continue
+        src = footage[id(entry)]
         # intro uses a different offset of the same footage so the visuals differ from entry 1
         start = 0.0 if badge else 1.0
-        dur = min(dur, max(1.0, narrate.duration(footage) - start))
-        render.render_narrated(footage, start, dur, voice, words, title, badge, cfg, seg)
+        dur = min(dur, max(1.0, narrate.duration(src) - start))
+        render.render_narrated(src, start, dur, voice, words, title, badge, cfg, seg)
         parts.append(seg)
 
-    if len(parts) < 3:
-        raise RuntimeError(f"only {len(parts)} usable segments for {script.title!r}")
     out = vdir / f"{_slug(script.title)}.mp4"
     return render.concat(parts, out)
 
