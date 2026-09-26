@@ -4,6 +4,7 @@ one vertical video with a big rank badge, entry title and word-highlight caption
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -100,8 +101,9 @@ def fact_check(script: Script, cfg: Config) -> list[verify.Check]:
         c = checks[-1]
         log.info("fact-check intro -> %s (%.2f) %s", c.verdict, c.confidence, c.note)
         if not verify.passes(c, cfg):
-            log.warning("intro rejected, dropping it: %r", script.intro)
+            log.warning("intro rejected, dropping it: %r / %r", script.title, script.intro)
             script.intro = ""
+            script.title = f"Top {len(script.entries)} {script.topic}".strip()
     return checks
 
 
@@ -169,7 +171,8 @@ def footage_matches(entry: Entry, title: str) -> bool:
 
 def fetch_footage(entry: Entry, secs: float, dest: Path, cfg: Config) -> Path | None:
     """Download only a `secs`-long window from the best-matching video (yt-dlp sections)."""
-    out = dest / f"{entry.rank:02d}-{_slug(entry.name)[:30]}.mp4"
+    key = hashlib.sha1(f"{entry.name}|{entry.query}".encode()).hexdigest()[:8]
+    out = dest / f"{entry.rank:02d}-{_slug(entry.name)[:30]}-{key}.mp4"
     if out.exists():
         return out
     try:

@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -245,14 +246,21 @@ def test_intro_is_checked_and_dropped(tmp_path, monkeypatch):
     checks = top10.fact_check(s, cfg)
     assert len(checks) == 4 and seen["claims"][-1] == ("Top 10: hi", "nfl")
     assert s.intro == "" and all(e.verdict == "supported" for e in s.entries)
+    assert s.title == "Top 3 nfl"
 
 
 def test_footage_cache_is_per_entry(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
-    (tmp_path / "01-old-play.mp4").write_bytes(b"x")
     monkeypatch.setattr(trends, "yt_search", lambda q, n=8: [])
-    assert top10.fetch_footage(top10.Entry(1, "old play", "l", "q"), 5, tmp_path, cfg)
+    old = top10.Entry(1, "old play", "l", "q")
+    assert top10.fetch_footage(old, 5, tmp_path, cfg) is None
+    cached = tmp_path / "01-old-play-cafe1234.mp4"
+    key = hashlib.sha1(b"old play|q").hexdigest()[:8]
+    cached = cached.with_name(f"01-old-play-{key}.mp4")
+    cached.write_bytes(b"x")
+    assert top10.fetch_footage(old, 5, tmp_path, cfg) == cached
     assert top10.fetch_footage(top10.Entry(1, "new play", "l", "q"), 5, tmp_path, cfg) is None
+    assert top10.fetch_footage(top10.Entry(1, "old play", "l", "other q"), 5, tmp_path, cfg) is None
 
 
 def test_rejected_hook_replaces_title_too(tmp_path, monkeypatch):
@@ -279,4 +287,7 @@ def test_unverifiable_hook_dropped_in_strict_mode(tmp_path, monkeypatch):
     assert m.narration == "narration"  # permissive default keeps it
     cfg.verify.strict = True
     pipeline.check_hooks([m], segs, cfg, tmp_path / "b.json")
+    assert m.narration == ""
+    m = Moment(0, 5, "hook", "r", 1.0, narration="narration")
+    pipeline.check_hooks([m], [], cfg, tmp_path / "c.json")  # no transcript = unverifiable
     assert m.narration == ""
