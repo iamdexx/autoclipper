@@ -45,7 +45,7 @@ out of the company you built from your garage."*). Voices are real neural TTS, n
 | `elevenlabs` | `ELEVENLABS_API_KEY` (best quality, 10k chars/month free) | Adam |
 | `openai` | `OPENAI_API_KEY` | onyx |
 
-`auto` picks ElevenLabs > Gemini > OpenAI. Tune `narration.style`, `duck_db`, `max_len_s`, or set
+`auto` picks ElevenLabs > Gemini > OpenAI. Tune `duck_db`, `max_len_s`, or set
 `provider: off` in `config.yaml` to keep only the creator's own audio.
 
 ## Publishing

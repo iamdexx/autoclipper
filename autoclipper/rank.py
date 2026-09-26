@@ -129,7 +129,7 @@ laughter, money/numbers, controversy, or a clear story with payoff. Each clip mu
 {min_len} and {max_len} seconds, must start at a natural sentence beginning and end on a payoff.
 Return ONLY a JSON array, no prose, each item:
 {{"start": <seconds float>, "end": <seconds float>, "hook": "<punchy 4-9 word on-screen title>",
-  "narration": "<1-2 short spoken sentences (max 20 words) a hype narrator says before the clip to make viewers stay, e.g. 'Wait for what he says about his boss.' No hashtags, no emojis.>",
+  "narration": "<1-2 short punchy sentences (max 18 words) an excited narrator says before the clip to make viewers stay, e.g. 'Wait for what he says about his boss!' Plain spoken words only: no stage directions, hashtags or emojis.>",
   "reason": "<one sentence>", "score": <0-10>}}
 
 TRANSCRIPT:
