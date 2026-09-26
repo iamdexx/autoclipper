@@ -424,14 +424,13 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
         if not badge:
             cuts = cuts[::-1]
         events = None
-        one_word: bool | None = None
         duck = t.source_db
         if ranking:
             # banner + running list instead of a badge (the intro shows the list still empty),
-            # one big word at a time; without a narrator the clip's own speech is what gets
-            # captioned and its audio is left alone
+            # without a narrator the clip's own speech is what gets captioned and its audio
+            # is left alone
             revealed = entry.rank if badge else entry.rank + 1
-            title, badge, one_word = "", "", True
+            title, badge = "", ""
             events = render.ranking_events(script.title, script.tease, labels, revealed, dur)
             if not voice:
                 words, duck = _clip_words(src, cuts, cfg), 0.0
@@ -447,7 +446,6 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
             sfx=whoosh,
             duck_db=duck,
             events=events,
-            one_word=one_word,
         )
         parts.append(seg)
     return _finish(parts, script.title, cfg, vdir)

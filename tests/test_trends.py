@@ -305,6 +305,13 @@ def test_one_word_captions(tmp_path):
     assert lines[-1].endswith("THE BAIT")
 
 
+def test_one_word_caption_clears_during_a_long_pause(tmp_path):
+    cfg = _cfg(tmp_path)
+    words = [Word(0.0, 0.4, "Wait"), Word(3.0, 3.4, "what")]
+    lines = [ln for ln in render.build_ass(words, "", 4.0, cfg).splitlines() if ln.startswith("D")]
+    assert lines[0].split(",")[2] == "0:00:01.00"  # 0.4 + 0.6 hold, not 3.0
+
+
 def test_caption_style_is_one_setting_for_every_format(tmp_path):
     cfg = _cfg(tmp_path)
     words = [Word(0.0, 0.4, "Bro"), Word(0.5, 0.9, "took"), Word(1.0, 1.4, "the bait!")]

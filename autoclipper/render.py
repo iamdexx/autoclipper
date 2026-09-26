@@ -119,7 +119,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         lines.append(f"Dialogue: 0,{_ts(0)},{_ts(min(dur, hook_secs))},Hook,,0,0,0,,{hook_text}")
     if one_word:
         for k, w in enumerate(words):
-            we = words[k + 1].start if k + 1 < len(words) else max(w.end, w.start + 0.3)
+            # hold until the next word, but never through a long pause
+            nxt = words[k + 1].start if k + 1 < len(words) else w.end
+            we = max(w.start + 0.3, min(nxt, w.end + 0.6))
             if we > w.start:
                 txt = _esc(w.text.strip(".,!?;:").upper())
                 lines.append(f"Dialogue: 0,{_ts(w.start)},{_ts(we)},Word,,0,0,0,,{txt}")
@@ -310,10 +312,10 @@ def render_still(
     zoom_in: bool = True,
 ) -> Path:
     """One listicle item: a still photo with a slow Ken Burns zoom (in or out) over a blurred
-    fill, one word on screen at a time, narration as the only audio."""
+    fill, captions in the global style, narration as the only audio."""
     out.parent.mkdir(parents=True, exist_ok=True)
     ass_path = out.with_suffix(".ass")
-    ass_path.write_text(build_ass(words, "", dur, cfg, badge="", one_word=True))
+    ass_path.write_text(build_ass(words, "", dur, cfg, badge=""))
     frames = max(1, round(dur * FPS))
     z = f"1+0.12*on/{frames}" if zoom_in else f"1.12-0.12*on/{frames}"
     # the composite is built at 2x and zoompan downsamples it, which keeps the slow zoom smooth
