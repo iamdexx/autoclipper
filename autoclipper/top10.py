@@ -11,7 +11,7 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import narrate, render, trends
+from . import narrate, render, trends, verify
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -24,6 +24,7 @@ class Entry:
     line: str  # what the narrator says
     query: str  # YouTube search for footage
     video_id: str = ""
+    verdict: str = ""  # fact-check result (verify.py); '' = not checked
 
 
 @dataclass
@@ -38,6 +39,8 @@ class Script:
 SCRIPT_PROMPT = """Write a viral "Top {n}" countdown short (TikTok / Reels / Shorts) about: {topic}
 Context: {angle}
 Rules: countdown from {n} to 1, best last. Every entry needs real footage findable on YouTube.
+Only REAL, well-documented events/facts - nothing invented; if unsure about a detail leave it out.
+{avoid}
 Narration is read aloud by an energetic narrator: plain spoken words only, no emojis, hashtags,
 stage directions or rank numbers inside the sentences (the video shows the number).
 Return ONLY JSON:
@@ -54,8 +57,13 @@ def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:40] or "top10"
 
 
-def write_script(topic: str, angle: str, cfg: Config) -> Script:
-    raw = trends._llm(SCRIPT_PROMPT.format(n=cfg.top10.items, topic=topic, angle=angle), cfg)
+def write_script(topic: str, angle: str, cfg: Config, avoid: list[str] | None = None) -> Script:
+    note = ""
+    if avoid:
+        note = "Do NOT use these (they failed a fact-check): " + "; ".join(avoid[:30])
+    raw = trends._llm(
+        SCRIPT_PROMPT.format(n=cfg.top10.items, topic=topic, angle=angle, avoid=note), cfg
+    )
     m = re.search(r"\{.*\}", raw, re.S)
     if not m:
         raise ValueError("no JSON in LLM output")
@@ -74,6 +82,82 @@ def write_script(topic: str, angle: str, cfg: Config) -> Script:
     )
 
 
+def fact_check(script: Script, cfg: Config) -> list[verify.Check]:
+    """Check every entry's narration against real-world evidence; sets Entry.verdict."""
+    claims = [
+        (f"{e.name}: {e.line}", e.query or f"{script.topic} {e.name}") for e in script.entries
+    ]
+    checks = verify.check_claims(claims, cfg)
+    for e, c in zip(script.entries, checks, strict=True):
+        e.verdict = c.verdict
+        log.info(
+            "fact-check #%d %s -> %s (%.2f) %s", e.rank, e.name, c.verdict, c.confidence, c.note
+        )
+    return checks
+
+
+def verified_script(topic: str, angle: str, cfg: Config, vdir: Path) -> Script:
+    """Write a script, drop entries that fail the fact-check, refill from a fresh draft (up to
+    verify.max_rounds), re-rank 10..1. Raises if fewer than verify.min_entries survive."""
+    v = cfg.verify
+    script = first = write_script(topic, angle, cfg)
+    if not v.enabled:
+        return script
+    vdir.mkdir(parents=True, exist_ok=True)
+    report: list[dict] = []
+    keep: list[Entry] = []
+    rejected: list[str] = []
+    seen: set[str] = set()
+    for rnd in range(max(1, v.max_rounds)):
+        checks = fact_check(script, cfg)
+        report += verify.dump(checks)
+        fresh: list[Entry] = []
+        for e, c in zip(script.entries, checks, strict=True):
+            k = e.name.lower()
+            if k in seen:
+                continue
+            seen.add(k)
+            if verify.passes(c, cfg):
+                fresh.append(e)
+            else:
+                rejected.append(e.name)
+        keep = fresh + keep  # refills take the low ranks; the original top picks stay on top
+        (vdir / "factcheck.json").write_text(json.dumps(report, indent=2))
+        if len(keep) >= cfg.top10.items or rnd == v.max_rounds - 1:
+            break
+        log.info("round %d: %d/%d entries verified; rewriting", rnd + 1, len(keep), cfg.top10.items)
+        script = write_script(topic, angle, cfg, avoid=rejected + [e.name for e in keep])
+    if len(keep) < v.min_entries:
+        raise RuntimeError(
+            f"fact-check: only {len(keep)} verified entries for {topic!r} (need {v.min_entries})"
+        )
+    keep = keep[-cfg.top10.items :]
+    for i, e in enumerate(keep):
+        e.rank = len(keep) - i
+    first.entries = keep
+    return first
+
+
+_STOP = set(
+    "the a an of in on at to and or vs v for with his her their its this that from by".split()
+)
+
+
+def _keywords(s: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", s.lower()) if len(w) > 2 and w not in _STOP}
+
+
+def footage_matches(entry: Entry, title: str) -> bool:
+    """The search result must actually be about the entry: the video title has to share the
+    proper-noun-ish keywords of the entry name (or most of the query)."""
+    t = _keywords(title)
+    name = _keywords(entry.name)
+    if name and len(name & t) >= max(1, len(name) // 2):
+        return True
+    q = _keywords(entry.query)
+    return bool(q) and len(q & t) >= max(2, (len(q) * 2) // 3)
+
+
 def fetch_footage(entry: Entry, secs: float, dest: Path, cfg: Config) -> Path | None:
     """Download only a `secs`-long window from the best-matching video (yt-dlp sections)."""
     out = dest / f"{entry.rank:02d}.mp4"
@@ -88,6 +172,7 @@ def fetch_footage(entry: Entry, secs: float, dest: Path, cfg: Config) -> Path | 
     except Exception as e:
         log.warning("footage search failed for %r: %s", entry.query, e)
         return None
+    cands = [c for c in cands if footage_matches(entry, c.title)]
     cands.sort(key=lambda c: -c.views)
     for c in cands[:3]:
         # skip the first ~20% (intros) and pull a window from there
@@ -167,6 +252,6 @@ def pick_topic(cfg: Config, used: list[str]) -> tuple[str, str] | None:
 
 
 def make(topic: str, angle: str, cfg: Config, vdir: Path) -> tuple[Path, Script]:
-    script = write_script(topic, angle, cfg)
+    script = verified_script(topic, angle, cfg, vdir)
     log.info("top10 %r: %d entries", script.title, len(script.entries))
     return build(script, cfg, vdir), script

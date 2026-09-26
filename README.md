@@ -80,6 +80,24 @@ would be picked; add `--clip` to actually make the clips.
   audio ducked under it, big `#10 ... #1` badge + entry title on screen
 - segments are concatenated into one MP4 in `data/top10/<slug>/`
 
+## Fact-check gate (`verify:`)
+
+Nothing the narrator says goes out unchecked (`verify.py`):
+
+- **Top 10 entries** - for each entry we pull real evidence (Google News headlines, Wikipedia,
+  YouTube titles; no API keys) and the LLM judges the claim *only against that evidence*:
+  `supported` / `unsupported` / `unverifiable` + confidence + note. `unsupported` entries are
+  dropped (also `unverifiable` when `strict: true`), the script is rewritten to refill them
+  (`max_rounds`), and the video is skipped if fewer than `min_entries` survive. Full report with
+  sources: `data/top10/<slug>/factcheck.json`.
+- **Footage** - a YouTube result is only used if its title actually names the entry (keyword
+  overlap), so a random high-view video can't stand in for the narrated event.
+- **Creator / trend clips** - the narrator's hook is checked against the clip's own transcript;
+  an unfaithful hook is replaced with the checker's faithful rewrite or dropped
+  (`data/videos/<id>/factcheck.json`).
+- `autoclipper factcheck data/top10/<slug>/script.json` audits an existing script (exit 1 if
+  anything fails); `autoclipper factcheck "some claim" --query "search terms"` checks one claim.
+
 ## Publishing
 
 Everything is `dry_run: true` by default: clips render and the log shows what *would* be posted.

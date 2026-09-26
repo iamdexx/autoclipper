@@ -53,3 +53,11 @@ top10:
   items: 10
   item_min_s: 3.5
   topics: []            # fixed ideas e.g. ["craziest NFL plays this week"]; empty = from trends
+
+verify:                # fact-check gate for everything the narrator says (see README)
+  enabled: true
+  strict: false        # true = also drop entries that couldn't be verified either way
+  min_confidence: 0.5
+  min_entries: 7       # skip the Top-10 if fewer entries survive the check
+  max_rounds: 2        # script rewrites to replace dropped entries
+  check_hooks: true    # creator/trend clips: narrator hook must match the transcript

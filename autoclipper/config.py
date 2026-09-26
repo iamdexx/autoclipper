@@ -72,6 +72,18 @@ class Trends:
 
 
 @dataclass
+class Verify:
+    """Fact-check gate for narration (see verify.py)."""
+
+    enabled: bool = True
+    strict: bool = False  # True: 'unverifiable' entries are dropped too, not just 'unsupported'
+    min_confidence: float = 0.5  # 'supported' below this is treated as unverifiable
+    min_entries: int = 7  # Top-10 needs at least this many verified entries or it's skipped
+    max_rounds: int = 2  # script (re)writes to fill dropped entries
+    check_hooks: bool = True  # creator/trend clips: narrator hook vs transcript
+
+
+@dataclass
 class TopTen:
     enabled: bool = False
     per_run: int = 1  # how many Top-10 videos to make per run
@@ -96,6 +108,7 @@ class Config:
     narration: Narration = field(default_factory=Narration)
     trends: Trends = field(default_factory=Trends)
     top10: TopTen = field(default_factory=TopTen)
+    verify: Verify = field(default_factory=Verify)
     poll_interval_s: int = 900
     max_videos_per_run: int = 2
 
@@ -109,6 +122,7 @@ class Config:
         narration = Narration(**raw.pop("narration", {}))
         trends = Trends(**raw.pop("trends", {}))
         top10 = TopTen(**raw.pop("top10", {}))
+        verify = Verify(**raw.pop("verify", {}))
         workdir = Path(os.path.expanduser(raw.pop("workdir", "data")))
         return cls(
             creators=creators,
@@ -119,5 +133,6 @@ class Config:
             narration=narration,
             trends=trends,
             top10=top10,
+            verify=verify,
             **raw,
         )
