@@ -62,15 +62,28 @@ def process_video(
 
 
 def check_hooks(moments, segments, cfg: Config, report: Path) -> None:
-    """Narrator hooks must be faithful to the clip: unsupported ones are replaced with the
-    checker's faithful rewrite, or dropped (clip keeps the creator's own audio) if none."""
+    """The on-screen hook and the narrator's line must be faithful to the clip. Anything that
+    fails verify.passes() (unsupported; unverifiable too in strict mode) is replaced: narration by
+    the checker's faithful rewrite (or dropped - the clip keeps the creator's own audio), the
+    on-screen title by a line taken straight from the transcript."""
     rows = []
     for m in moments:
         text = " ".join(s.text for s in segments if s.end > m.start and s.start < m.end)
-        chk, fixed = verify.check_hook(m.narration or m.hook, text, cfg)
+        claim = m.hook if not m.narration else f"{m.hook}. {m.narration}"
+        chk, fixed = verify.check_hook(claim, text, cfg)
         rows.append({**verify.dump([chk])[0], "fixed": fixed})
-        if chk.verdict == "unsupported":
-            log.warning("hook rejected (%s): %r -> %r", chk.note, m.narration, fixed)
+        if not verify.passes(chk, cfg):
+            safe_hook = rank._hook_from_text(text) if text else ""
+            log.warning(
+                "hook rejected (%s %s): %r / %r -> %r / %r",
+                chk.verdict,
+                chk.note,
+                m.hook,
+                m.narration,
+                safe_hook,
+                fixed,
+            )
+            m.hook = safe_hook or m.hook
             m.narration = fixed
     report.write_text(json.dumps(rows, indent=2))
 

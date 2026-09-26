@@ -149,7 +149,7 @@ def test_verified_script_drops_refills_and_reranks(tmp_path, monkeypatch):
     assert s.title == "Top 10"
     assert "play 3" in prompts[1] and "play 8" in prompts[1]
     report = json.loads((tmp_path / "factcheck.json").read_text())
-    assert len(report) == 13 and all(r["verdict"] in verify.VERDICTS for r in report)
+    assert len(report) == 14 and all(r["verdict"] in verify.VERDICTS for r in report)
 
 
 def test_verified_script_skips_video_when_too_few_survive(tmp_path, monkeypatch):
@@ -215,7 +215,7 @@ def test_factcheck_cli_exit_code(tmp_path, monkeypatch):
     (d / "script.json").write_text(
         json.dumps({**vars(_script(3)), "entries": [vars(e) for e in _script(3).entries]})
     )
-    verdicts = iter(["supported", "unsupported", "supported"])
+    verdicts = iter(["supported", "unsupported", "supported", "supported"])
     monkeypatch.setattr(
         verify,
         "check_claims",
@@ -224,6 +224,59 @@ def test_factcheck_cli_exit_code(tmp_path, monkeypatch):
     args = ["-c", str(ROOT / "config.yaml"), "factcheck", str(d / "script.json")]
     monkeypatch.chdir(tmp_path)
     assert cli.main(args) == 1
-    assert len(json.loads((d / "factcheck.json").read_text())) == 3
-    verdicts = iter(["supported"] * 3)
+    assert len(json.loads((d / "factcheck.json").read_text())) == 4
+    verdicts = iter(["supported"] * 4)
     assert cli.main(args) == 0
+
+
+def test_intro_is_checked_and_dropped(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    seen = {}
+
+    def fake(claims, c):
+        seen["claims"] = claims
+        return [
+            verify.Check(cl, "unsupported" if cl.startswith("Top 10:") else "supported", 0.9)
+            for cl, _ in claims
+        ]
+
+    monkeypatch.setattr(verify, "check_claims", fake)
+    s = _script(3)
+    checks = top10.fact_check(s, cfg)
+    assert len(checks) == 4 and seen["claims"][-1] == ("Top 10: hi", "nfl")
+    assert s.intro == "" and all(e.verdict == "supported" for e in s.entries)
+
+
+def test_footage_cache_is_per_entry(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    (tmp_path / "01-old-play.mp4").write_bytes(b"x")
+    monkeypatch.setattr(trends, "yt_search", lambda q, n=8: [])
+    assert top10.fetch_footage(top10.Entry(1, "old play", "l", "q"), 5, tmp_path, cfg)
+    assert top10.fetch_footage(top10.Entry(1, "new play", "l", "q"), 5, tmp_path, cfg) is None
+
+
+def test_rejected_hook_replaces_title_too(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    monkeypatch.setattr(
+        trends, "_llm", lambda p, c: '{"verdict": "unsupported", "confidence": 0.9, "note": "n"}'
+    )
+    segs = [Segment(0, 5, "We started Apple in my parents garage back in 1976.", [])]
+    m = Moment(0, 5, "HE SOLD APPLE FOR $1", "r", 1.0, narration="He sold Apple for a dollar!")
+    pipeline.check_hooks([m], segs, cfg, tmp_path / "fc.json")
+    assert m.narration == "" and m.hook == "We started Apple in my parents garage back in 1976"
+
+
+def test_unverifiable_hook_dropped_in_strict_mode(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+
+    def boom(p, c):
+        raise RuntimeError("503")
+
+    monkeypatch.setattr(trends, "_llm", boom)
+    segs = [Segment(0, 5, "hello there everyone welcome back", [])]
+    m = Moment(0, 5, "hook", "r", 1.0, narration="narration")
+    pipeline.check_hooks([m], segs, cfg, tmp_path / "a.json")
+    assert m.narration == "narration"  # permissive default keeps it
+    cfg.verify.strict = True
+    pipeline.check_hooks([m], segs, cfg, tmp_path / "b.json")
+    assert m.narration == ""

@@ -106,6 +106,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             checks = top10.fact_check(script, cfg)
             labels = [f"#{e.rank} {e.name}" for e in script.entries]
+            if len(checks) > len(labels):
+                labels.append("intro")
             (p.parent / "factcheck.json").write_text(json.dumps(verify.dump(checks), indent=2))
         else:
             checks = verify.check_claims([(args.target, args.query or args.target)], cfg)
