@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import publish, top10, trends, verify
+from . import publish, qa, top10, trends, verify
 from .config import Config, Creator
 from .pipeline import make_top10, process_video, run_once, run_trends
 from .state import State
@@ -41,6 +41,10 @@ def main(argv: list[str] | None = None) -> int:
     fc.add_argument("target", help="path to data/top10/<slug>/script.json, or a claim in quotes")
     fc.add_argument("--query", default="", help="search query for a free-text claim")
 
+    qp = sub.add_parser("qa", help="run the output quality gate on a finished video")
+    qp.add_argument("video")
+    qp.add_argument("--script", help="script.json (top10) to compare the narration against")
+    qp.add_argument("--expect", default="", help="text the narrator should be heard saying")
     sub.add_parser("run", help="one pass: creators + trends + top10 (whatever is enabled)")
     sub.add_parser("watch", help="loop `run` forever every poll_interval_s")
 
@@ -122,6 +126,17 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"     - [{ev.kind}] {ev.title[:90]}  {ev.url}")
         print(f"\n{len(checks) - bad}/{len(checks)} passed")
         return 1 if bad else 0
+    if args.cmd == "qa":
+        expect, kind = args.expect, "clip"
+        if args.script:
+            j = json.loads(Path(args.script).read_text())
+            expect = " ".join([j.get("intro", ""), *(e["line"] for e in j["entries"])])
+            kind = "top10"
+        rep = qa.check(Path(args.video), cfg, expect, kind)
+        for c in rep.checks:
+            print(f"{'PASS' if c.ok else 'FAIL'} {c.name:<11} {c.detail}")
+        print(f"\n{'OK' if rep.ok else 'REJECTED'}")
+        return 0 if rep.ok else 1
     if args.cmd == "run":
         run_once(cfg, state)
         return 0

@@ -86,6 +86,27 @@ class Verify:
 
 
 @dataclass
+class QA:
+    """Output quality gate run on every finished video before publishing (see qa.py)."""
+
+    enabled: bool = True
+    clip_min_s: float = 15.0
+    clip_max_s: float = 90.0
+    top10_min_s: float = 12.0
+    top10_max_s: float = 90.0
+    min_mean_db: float = -30.0  # average level; quieter = narration buried / missing
+    max_mean_db: float = -8.0
+    max_peak_db: float = -0.1  # anything above = clipping
+    silence_db: float = -40.0
+    max_silence_s: float = 1.5  # dead air longer than this fails
+    max_black_s: float = 0.5
+    max_freeze_s: float = 3.0
+    check_speech: bool = True  # re-transcribe the output and compare with the script
+    min_speech_match: float = 0.6  # share of the script's content words that must be heard
+    speech_required: bool = True  # fail (not skip) when the output can't be transcribed
+
+
+@dataclass
 class TopTen:
     enabled: bool = False
     per_run: int = 1  # how many Top-10 videos to make per run
@@ -135,6 +156,7 @@ class Config:
     trends: Trends = field(default_factory=Trends)
     top10: TopTen = field(default_factory=TopTen)
     verify: Verify = field(default_factory=Verify)
+    qa: QA = field(default_factory=QA)
     poll_interval_s: int = 900
     max_videos_per_run: int = 2
     max_video_age_h: float = 72  # creator uploads older than this are never picked up
@@ -150,6 +172,7 @@ class Config:
         trends = Trends(**raw.pop("trends", {}))
         top10 = TopTen(**raw.pop("top10", {}))
         verify = Verify(**raw.pop("verify", {}))
+        qa = QA(**raw.pop("qa", {}))
         workdir = Path(os.path.expanduser(raw.pop("workdir", "data")))
         return cls(
             creators=creators,
@@ -161,5 +184,6 @@ class Config:
             trends=trends,
             top10=top10,
             verify=verify,
+            qa=qa,
             **raw,
         )

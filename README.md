@@ -120,6 +120,22 @@ Nothing the narrator says goes out unchecked (`verify.py`):
 - `autoclipper factcheck data/top10/<slug>/script.json` audits an existing script (exit 1 if
   anything fails); `autoclipper factcheck "some claim" --query "search terms"` checks one claim.
 
+## Quality gate (`qa:`)
+
+Every finished video is inspected before it can be published (`autoclipper qa <video>
+[--script script.json | --expect "text"]` runs it by hand; the report is written to
+`<video>.qa.json` either way):
+
+- file: video + audio streams present, 1080x1920, duration inside the window, A/V lengths match
+- audio: average level inside a window (too quiet = narration buried/missing), no clipping,
+  no dead air longer than `max_silence_s`
+- picture: no black stretches, no frozen frames
+- speech: the output is re-transcribed with whisper and at least `min_speech_match` of the
+  script's content words must be heard - catches missing/garbled narration and wrong audio
+
+A failing video is kept on disk with its report, recorded in state as `qa_failed`, and never
+published. `qa.enabled: false` turns the gate off.
+
 ## Publishing
 
 Everything is `dry_run: true` by default: clips render and the log shows what *would* be posted.

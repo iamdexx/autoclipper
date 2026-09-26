@@ -467,6 +467,11 @@ def pick_topic(cfg: Config, used: list[str]) -> tuple[str, str] | None:
     return tp.name, tp.angle or tp.headline
 
 
+def narration_text(script: Script) -> str:
+    """Everything the narrator is meant to say, for the QA speech check."""
+    return " ".join([script.intro, *(e.line for e in script.entries)]).strip()
+
+
 def make(topic: str, angle: str, cfg: Config, vdir: Path) -> tuple[Path, Script]:
     script = verified_script(topic, angle, cfg, vdir)
     log.info("top10 %r: %d entries", script.title, len(script.entries))

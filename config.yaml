@@ -71,3 +71,18 @@ verify:                # fact-check gate for everything the narrator says (see R
   min_entries: 4       # skip the video if fewer entries survive the check (7 for a Top 10)
   max_rounds: 2        # script rewrites to replace dropped entries
   check_hooks: true    # creator/trend clips: narrator hook must match the transcript
+
+qa:                    # quality gate on every finished video; a failing video is never published
+  enabled: true        # report lands in <video>.qa.json either way
+  clip_min_s: 15
+  clip_max_s: 90
+  top10_min_s: 12
+  top10_max_s: 90
+  min_mean_db: -30     # average loudness window (too quiet = narration buried or missing)
+  max_mean_db: -8
+  max_peak_db: -0.1    # clipping
+  max_silence_s: 1.5   # dead air
+  max_black_s: 0.5     # black frames
+  max_freeze_s: 3.0    # frozen picture
+  check_speech: true   # re-transcribe the output and compare with the script
+  min_speech_match: 0.6

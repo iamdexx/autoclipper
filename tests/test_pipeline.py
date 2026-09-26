@@ -2,7 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from autoclipper import narrate, rank, render
+from autoclipper import narrate, qa, rank, render
 from autoclipper.config import Config
 from autoclipper.ingest import Segment, Word
 from autoclipper.rank import Moment
@@ -205,3 +205,49 @@ def test_publish_top10_templates(tmp_path):
     res = publish.publish_all(tmp_path / "v.mp4", "Top 10 plays", "", ["#nfl"], cfg, kind="top10")
     assert res["youtube"]["title"] == "Top 10 plays #shorts"
     assert "clip from" not in res["youtube"]["caption"]
+
+
+def _synthetic(tmp_path, name, dur, audio="anoisesrc=color=pink:amplitude=0.3", video="testsrc2="):
+    out = tmp_path / name
+    subprocess.check_call(
+        [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", f"{video}size=1080x1920:rate=30:d={dur}",
+            "-f", "lavfi", "-i", f"{audio}:d={dur}",
+            "-shortest", "-c:v", "libx264", "-preset", "ultrafast",
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-ac", "2", str(out),
+        ]
+    )  # fmt: skip
+    return out
+
+
+def test_qa_gate_passes_a_sane_video_and_writes_report(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.qa.top10_min_s = 3
+    monkeypatch.setattr(
+        qa.ingest,
+        "transcribe",
+        lambda v, c, cache: [Segment(0, 1, "the miami miracle lateral", [])],
+    )
+    vid = _synthetic(tmp_path, "ok.mp4", 5)
+    assert qa.gate(vid, cfg, "Miami Miracle lateral", kind="top10")
+    rep = json.loads((tmp_path / "ok.qa.json").read_text())
+    assert rep["ok"] and {c["name"] for c in rep["checks"]} >= {"aspect", "loudness", "speech"}
+
+
+def test_qa_gate_rejects_silence_black_and_wrong_narration(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.qa.top10_min_s = 3
+    monkeypatch.setattr(
+        qa.ingest, "transcribe", lambda v, c, cache: [Segment(0, 1, "completely different", [])]
+    )
+    vid = _synthetic(tmp_path, "bad.mp4", 5, audio="anullsrc=r=48000", video="color=c=black:")
+    rep = qa.check(vid, cfg, "Miami Miracle lateral touchdown", kind="top10")
+    failed = {c.name for c in rep.checks if not c.ok}
+    assert not rep.ok and {"loudness", "dead_air", "black", "speech"} <= failed
+    assert qa.check(_synthetic(tmp_path, "short.mp4", 1), cfg, "", kind="clip").ok is False
+
+
+def test_qa_speech_match_ignores_stopwords():
+    assert qa.script_match("the Miami Miracle, and it is on", "miami miracle") == 1.0
+    assert qa.script_match("the Dolphins pulled off the Miami Miracle", "cats") == 0.0
