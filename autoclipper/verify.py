@@ -221,8 +221,11 @@ TRANSCRIPT: {transcript}
 def check_hook(hook: str, transcript: str, cfg: Config) -> tuple[Check, str]:
     """(check, replacement) - replacement is '' when the hook is fine or no fix was offered."""
     chk = Check(claim=hook)
-    if not hook.strip() or not transcript.strip():
-        chk.verdict = "supported"
+    if not hook.strip():
+        chk.verdict, chk.confidence, chk.note = "supported", 1.0, "nothing to check"
+        return chk, ""
+    if not transcript.strip():
+        chk.note = "no transcript for this window"
         return chk, ""
     try:
         raw = trends._llm(HOOK_PROMPT.format(hook=hook, transcript=transcript[:4000]), cfg)
