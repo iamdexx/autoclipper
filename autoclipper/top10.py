@@ -12,8 +12,9 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import narrate, render, sfx, trends, verify
+from . import images, ingest, narrate, render, sfx, trends, verify
 from .config import Config
+from .ingest import Word
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ class Entry:
     query: str  # YouTube search for footage
     video_id: str = ""
     verdict: str = ""  # fact-check result (verify.py); '' = not checked
+    label: str = ""  # ranking style: 1-3 word tag shown in the on-screen list
 
 
 @dataclass
@@ -35,6 +37,7 @@ class Script:
     intro: str  # narrator's opening line
     hashtags: list[str] = field(default_factory=list)
     entries: list[Entry] = field(default_factory=list)
+    tease: str = ""  # ranking style: small line under the title, e.g. "the last one is insane"
 
 
 SCRIPT_PROMPT = """Write a viral "Top {n}" countdown short (TikTok / Reels / Shorts) about: {topic}
@@ -57,6 +60,48 @@ Return ONLY JSON:
 """
 
 
+LISTICLE_PROMPT = """Write a viral {n}-item listicle short (TikTok / Reels / Shorts) about: {topic}
+Context: {angle}
+Format: "{n} <things> that <hook>" - e.g. "{n} moments nobody expected this week". Each item is
+one still photo on screen while a narrator says ONE short sentence about it, so every item must
+be something a real, findable photo can show (a person, a place, a play, a product, a scene).
+Only REAL, well-documented events/facts - nothing invented; if unsure about a detail leave it out.
+{avoid}
+Narration is read aloud by a calm, confident narrator with no pauses between items: plain spoken
+words only, no emojis, hashtags, stage directions or numbering inside the sentences.
+Style: the intro is the title said as a hook (max 10 words), each line leads with the surprising
+concrete detail, stays under 14 words, and the last item is the biggest payoff.
+Return ONLY JSON:
+{{"title": "<{n} ... - punchy, max 8 words>",
+  "intro": "<the hook sentence, max 10 words>",
+  "hashtags": ["#a", "#b", "#c", "#d"],
+  "entries": [{{"rank": {n}, "name": "<item, max 5 words>",
+                "line": "<1 sentence, 8-14 words, specific>",
+                "query": "<image search: the exact subject, 2-5 words, proper nouns first>"}}, ...]}}
+"""
+
+
+RANKING_PROMPT = """Write a viral "Ranking ..." short (TikTok / Reels / Shorts) about: {topic}
+Context: {angle}
+Format: {n} real clips shown back to back, ranked {n} (shown first) to 1 (best, shown last). A
+title banner stays on screen ("Ranking The Most Insane <X> Moments") with a small tease under it,
+and a 1-{n} list on the left fills in with a 1-3 word label as each clip plays. The clips' own
+audio is the content, so every entry must be a specific moment findable as a YouTube video.
+Only REAL, well-documented moments - nothing invented; if unsure about a detail leave it out.
+{avoid}
+Return ONLY JSON:
+{{"title": "<Ranking ... - starts with 'Ranking', max 6 words>",
+  "tease": "<max 7 words, e.g. 'the last one broke the internet'>",
+  "hashtags": ["#a", "#b", "#c", "#d"],
+  "entries": [{{"rank": {n}, "name": "<moment, max 5 words>",
+                "label": "<1-3 word list tag, punchy, e.g. 'Skilled', 'Hell nah', 'Smooth'>",
+                "line": "<what happens, 1 sentence under 12 words, plain spoken words>",
+                "query": "<YouTube search that finds footage of exactly this>"}}, ...]}}
+"""
+
+_PROMPTS = {"countdown": SCRIPT_PROMPT, "listicle": LISTICLE_PROMPT, "ranking": RANKING_PROMPT}
+
+
 def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:40] or "top10"
 
@@ -65,15 +110,20 @@ def write_script(topic: str, angle: str, cfg: Config, avoid: list[str] | None = 
     note = ""
     if avoid:
         note = "Do NOT use these (they failed a fact-check): " + "; ".join(avoid[:30])
-    raw = trends._llm(
-        SCRIPT_PROMPT.format(n=cfg.top10.items, topic=topic, angle=angle, avoid=note), cfg
-    )
+    prompt = _PROMPTS.get(cfg.top10.style, SCRIPT_PROMPT)
+    raw = trends._llm(prompt.format(n=cfg.top10.items, topic=topic, angle=angle, avoid=note), cfg)
     m = re.search(r"\{.*\}", raw, re.S)
     if not m:
         raise ValueError("no JSON in LLM output")
     j = json.loads(m.group(0))
     entries = [
-        Entry(int(e["rank"]), str(e["name"])[:60], str(e["line"])[:300], str(e["query"]))
+        Entry(
+            int(e["rank"]),
+            str(e["name"])[:60],
+            str(e["line"])[:300],
+            str(e["query"]),
+            label=str(e.get("label", ""))[:24],
+        )
         for e in j["entries"]
     ]
     entries.sort(key=lambda e: -e.rank)
@@ -83,6 +133,7 @@ def write_script(topic: str, angle: str, cfg: Config, avoid: list[str] | None = 
         intro=str(j.get("intro", ""))[:200],
         hashtags=[str(h) for h in j.get("hashtags", [])][:6],
         entries=entries[: cfg.top10.items],
+        tease=str(j.get("tease", ""))[:60],
     )
 
 
@@ -232,7 +283,93 @@ def fetch_footage(entry: Entry, secs: float, dest: Path, cfg: Config) -> Path | 
     return None
 
 
+def _renumber(script: Script, cfg: Config, kept: int) -> None:
+    """After dropping entries: ranks N..1 with no holes, and the title never promises more
+    items than the video shows."""
+    n = len(script.entries)
+    for i, e in enumerate(script.entries):
+        e.rank = n - i
+    if n != cfg.top10.items:
+        script.title = re.sub(rf"\b{cfg.top10.items}\b", str(n), script.title, count=1)
+        if script.intro:
+            script.intro = re.sub(rf"\b{cfg.top10.items}\b", str(n), script.intro, count=1)
+
+
+def _finish(parts: list[Path], title: str, cfg: Config, vdir: Path) -> Path:
+    """Stitch the segments and lay one continuous music bed under the whole thing."""
+    out = vdir / f"{_slug(title)}.mp4"
+    render.concat(parts, out)
+    bed = None
+    if sfx.music_enabled(cfg):
+        bed = sfx.music_bed(narrate.duration(out), cfg, vdir / "music.m4a")
+    if bed:
+        raw = out.with_name(out.stem + ".nomusic.mp4")
+        out.rename(raw)
+        sfx.mix_under(raw, bed, cfg.top10.music_db, out)
+        raw.unlink()
+    return out
+
+
+def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
+    """Listicle style: one photo per item with a slow zoom, one word on screen at a time, the
+    narrator reads straight through with no gaps, no badges/SFX/clip audio - just voice + bed."""
+    t = cfg.top10
+    vdir.mkdir(parents=True, exist_ok=True)
+    (vdir / "script.json").write_text(json.dumps(asdict(script), indent=2))
+
+    pics: dict[int, Path] = {}
+    for e in script.entries:
+        p = images.fetch(e.query, e.name, vdir / "images")
+        if p is None:
+            log.warning("no image for #%d %s; dropping it", e.rank, e.name)
+        else:
+            pics[id(e)] = p
+    script.entries = [e for e in script.entries if id(e) in pics]
+    if len(script.entries) < max(3, cfg.verify.min_entries if cfg.verify.enabled else 3):
+        raise RuntimeError(f"only {len(script.entries)} entries with images for {script.title!r}")
+    _renumber(script, cfg, len(script.entries))
+    (vdir / "script.json").write_text(json.dumps(asdict(script), indent=2))
+
+    segments: list[tuple[str, Entry]] = []
+    if script.intro:
+        segments.append((script.intro, script.entries[0]))
+    segments += [(e.line, e) for e in script.entries]
+    parts: list[Path] = []
+    for i, (text, entry) in enumerate(segments):
+        seg = vdir / "segments" / f"{i:02d}.mp4"
+        voiced = narrate.synthesize_timed(text, cfg, seg.with_suffix(".voice.m4a"))
+        if voiced:
+            voice, words = voiced
+            dur = narrate.duration(voice) + t.listicle_gap_s
+        else:
+            voice, words = None, narrate.even_words(text, t.item_min_s)
+            dur = t.item_min_s
+        # the intro shares the first item's photo: zoom out on the intro, in on the item
+        zoom_in = not (script.intro and i == 0)
+        render.render_still(pics[id(entry)], dur, voice, words, cfg, seg, zoom_in=zoom_in)
+        parts.append(seg)
+    return _finish(parts, script.title, cfg, vdir)
+
+
+def _clip_words(src: Path, cuts: list[tuple[float, float]], cfg: Config) -> list[Word]:
+    """What is said in the footage windows, re-timed to the segment's clock."""
+    try:
+        segs = ingest.transcribe(src, cfg, src.with_suffix(".words.json"))
+    except Exception as e:
+        log.warning("could not transcribe %s: %s", src.name, e)
+        return []
+    out: list[Word] = []
+    at = 0.0
+    for s, ln in cuts:
+        out += [Word(w.start + at, w.end + at, w.text) for w in render.words_in(segs, s, s + ln)]
+        at += ln
+    return out
+
+
 def build(script: Script, cfg: Config, vdir: Path) -> Path:
+    if cfg.top10.style == "listicle":
+        return build_listicle(script, cfg, vdir)
+    ranking = cfg.top10.style == "ranking"
     t = cfg.top10
     vdir.mkdir(parents=True, exist_ok=True)
     (vdir / "script.json").write_text(json.dumps(asdict(script), indent=2))
@@ -250,29 +387,28 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
     script.entries = [e for e in script.entries if id(e) in footage]
     if len(script.entries) < max(3, cfg.verify.min_entries if cfg.verify.enabled else 3):
         raise RuntimeError(f"only {len(script.entries)} entries with footage for {script.title!r}")
-    n = len(script.entries)
-    for i, e in enumerate(script.entries):
-        e.rank = n - i
-    if n != t.items:  # "Top 10 ..." must not promise more than the video shows
-        script.title = re.sub(rf"\b{t.items}\b", str(n), script.title, count=1)
+    _renumber(script, cfg, len(script.entries))
     (vdir / "script.json").write_text(json.dumps(asdict(script), indent=2))
 
     # intro + entries share one loop; the intro rides on the first entry's footage
     segments: list[tuple[str, str, str, Entry]] = []
-    if script.intro:
+    if script.intro and not ranking:
         segments.append((script.intro, script.title, "", script.entries[0]))
     for e in script.entries:
         segments.append((e.line, e.name, f"#{e.rank}", e))
+    labels = [(e.rank, e.label or e.name) for e in script.entries]
 
     whoosh = sfx.whoosh(cfg.workdir / "assets" / "whoosh.m4a") if t.sfx else None
     for i, (text, title, badge, entry) in enumerate(segments):
         seg = vdir / "segments" / f"{i:02d}.mp4"
-        voiced = narrate.synthesize_timed(text, cfg, seg.with_suffix(".voice.m4a"))
+        voiced = None
+        if not ranking or t.narrate:
+            voiced = narrate.synthesize_timed(text, cfg, seg.with_suffix(".voice.m4a"))
         if voiced:
             voice, words = voiced
             dur = max(t.item_min_s, narrate.duration(voice) + 0.4)  # never cut speech
         else:
-            voice, words = None, narrate.even_words(text, t.item_min_s)
+            voice, words = None, [] if ranking else narrate.even_words(text, t.item_min_s)
             dur = t.item_min_s
         src = footage[id(entry)]
         avail = narrate.duration(src)
@@ -281,22 +417,32 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
         cuts = render.cut_plan(avail, min(dur, max(1.0, avail)), t.cuts_per_entry)
         if not badge:
             cuts = cuts[::-1]
+        events = None
+        one_word = False
+        duck = t.source_db
+        if ranking:
+            # the clip is the content: banner + running list instead of a badge, the clip's
+            # own speech captioned one word at a time, its audio left (nearly) alone
+            title, badge = "", ""
+            events = render.ranking_events(script.title, script.tease, labels, entry.rank, dur)
+            if not voice:
+                words, one_word, duck = _clip_words(src, cuts, cfg), True, 0.0
         render.render_narrated(
-            src, cuts, voice, words, title, badge, cfg, seg, sfx=whoosh, duck_db=t.source_db
+            src,
+            cuts,
+            voice,
+            words,
+            title,
+            badge,
+            cfg,
+            seg,
+            sfx=whoosh,
+            duck_db=duck,
+            events=events,
+            one_word=one_word,
         )
         parts.append(seg)
-
-    out = vdir / f"{_slug(script.title)}.mp4"
-    render.concat(parts, out)
-    bed = None
-    if sfx.music_enabled(cfg):
-        bed = sfx.music_bed(narrate.duration(out), cfg, vdir / "music.m4a")
-    if bed:
-        raw = out.with_name(out.stem + ".nomusic.mp4")
-        out.rename(raw)
-        sfx.mix_under(raw, bed, t.music_db, out)
-        raw.unlink()
-    return out
+    return _finish(parts, script.title, cfg, vdir)
 
 
 def pick_topic(cfg: Config, used: list[str]) -> tuple[str, str] | None:

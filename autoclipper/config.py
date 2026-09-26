@@ -80,7 +80,7 @@ class Verify:
     enabled: bool = True
     strict: bool = False  # True: 'unverifiable' entries are dropped too, not just 'unsupported'
     min_confidence: float = 0.5  # 'supported' below this is treated as unverifiable
-    min_entries: int = 7  # Top-10 needs at least this many verified entries or it's skipped
+    min_entries: int = 4  # a video needs at least this many verified entries or it's skipped
     max_rounds: int = 2  # script (re)writes to fill dropped entries
     check_hooks: bool = True  # creator/trend clips: narrator hook vs transcript
 
@@ -89,12 +89,20 @@ class Verify:
 class TopTen:
     enabled: bool = False
     per_run: int = 1  # how many Top-10 videos to make per run
-    items: int = 10
+    # ranking  = "Ranking The Most ... Moments": ~6 clips back to back with their own audio, a
+    #            colour title banner + tease, a 1..N list on the left that fills in per clip,
+    #            the clip's speech captioned one word at a time (no narrator unless `narrate`)
+    # countdown = "Top 10 ...": big rank badge per entry, narrator over ducked footage
+    # listicle  = "N photos ...": one still per item with a slow zoom, narrator reads through
+    style: str = "ranking"
+    narrate: bool = False  # ranking style: also voice a one-liner per clip
+    items: int = 6
     item_min_s: float = 3.5  # each entry lasts at least this (longer if the narration is)
+    listicle_gap_s: float = 0.25  # listicle: pause between items
     item_max_s: float = 10.0  # how much footage to fetch per entry
     source_max_duration_s: int = 30 * 60  # only clip from sources up to this long
     topics: list[str] = field(default_factory=list)  # fixed ideas; empty = derive from trends
-    cuts_per_entry: int = 2  # footage cuts per entry (each with a zoom punch)
+    cuts_per_entry: int = 1  # footage cuts per entry (each with a zoom punch)
     sfx: bool = True  # whoosh/hit on every rank reveal
     # the footage's own audio (crowd, commentary, whatever music the source clip had) under the
     # narration; kept low so it doesn't sound like the soundtrack changes at every rank

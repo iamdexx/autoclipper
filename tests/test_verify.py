@@ -41,7 +41,7 @@ def _script(n=10):
 
 def test_verify_config_loads():
     cfg = Config.load(ROOT / "config.yaml")
-    assert cfg.verify.enabled and cfg.verify.min_entries == 7 and not cfg.verify.strict
+    assert cfg.verify.enabled and cfg.verify.min_entries == 4 and not cfg.verify.strict
 
 
 def test_google_news_parses_rss(monkeypatch):
@@ -113,6 +113,7 @@ def test_passes_thresholds(tmp_path):
 
 def test_verified_script_drops_refills_and_reranks(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
+    cfg.top10.items, cfg.top10.style, cfg.verify.min_entries = 10, "countdown", 7
     _no_net(monkeypatch)
     drafts = iter([_script(), None])
     prompts = []

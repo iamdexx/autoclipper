@@ -2,8 +2,9 @@ import json
 import subprocess
 from pathlib import Path
 
-from autoclipper import narrate, render, top10, trends
+from autoclipper import images, narrate, render, top10, trends
 from autoclipper.config import Config
+from autoclipper.ingest import Word
 from autoclipper.state import State
 from autoclipper.trends import Candidate, Topic
 
@@ -29,7 +30,7 @@ def _cfg(tmp_path):
 def test_config_sections_load():
     cfg = Config.load(ROOT / "config.yaml")
     assert cfg.trends.geos == ["US"]
-    assert cfg.top10.items == 10
+    assert cfg.top10.items == 6 and cfg.top10.style == "ranking"
     assert cfg.narration.elevenlabs_voice == "TX3LPaxmHKxFdv7VOQHJ"  # Liam
 
 
@@ -263,3 +264,46 @@ def test_cut_plan():
     assert render.cut_plan(0.0, 4.0, 2) == [(0.0, 4.0)]
     assert "zoompan" in render._vf(Path("x.ass"), "[src]", [0.0, 2.0])
     assert "zoompan" not in render._vf(Path("x.ass"))
+
+
+def test_ranking_script_parsing_and_prompt(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.top10.items, cfg.top10.style = 2, "ranking"
+    j = {
+        "title": "Ranking Insane Moments",
+        "tease": "last one is wild",
+        "hashtags": ["#x"],
+        "entries": [
+            {"rank": 2, "name": "two", "label": "Smooth", "line": "l2", "query": "q2"},
+            {"rank": 1, "name": "one", "label": "Hell nah", "line": "l1", "query": "q1"},
+        ],
+    }
+    seen = {}
+    monkeypatch.setattr(trends, "_llm", lambda p, c: seen.setdefault("prompt", p) and json.dumps(j))
+    s = top10.write_script("things", "", cfg)
+    assert "Ranking" in seen["prompt"] and "label" in seen["prompt"]
+    assert s.tease == "last one is wild" and s.intro == ""
+    assert [e.label for e in s.entries] == ["Smooth", "Hell nah"]
+
+
+def test_ranking_events_fill_from_the_bottom():
+    labels = [(1, "Best"), (2, "Ouch"), (3, "Smooth")]
+    ev = render.ranking_events("Ranking The Best Moments", "wait for it", labels, 2, 5.0)
+    banner, rows = ev
+    assert "Ranking" in banner and "WAIT FOR IT" in banner
+    assert "Smooth" in rows and "Ouch" in rows and "Best" not in rows
+    assert rows.count("\\N") >= 2
+
+
+def test_one_word_captions(tmp_path):
+    cfg = _cfg(tmp_path)
+    words = [Word(0.0, 0.4, "Bro"), Word(0.5, 0.9, "took"), Word(1.0, 1.4, "the bait!")]
+    ass = render.build_ass(words, "", 2.0, cfg, one_word=True)
+    lines = [ln for ln in ass.splitlines() if ln.startswith("Dialogue")]
+    assert len(lines) == 3 and all(",Word," in ln for ln in lines)
+    assert lines[-1].endswith("THE BAIT")
+
+
+def test_image_matching():
+    assert images.matches("Justin Tucker field goal", "File:Justin Tucker kicks a field goal.jpg")
+    assert not images.matches("Justin Tucker field goal", "File:Sunset over the bay.jpg")

@@ -50,9 +50,12 @@ trends:
 top10:
   enabled: true
   per_run: 1
-  items: 10
+  style: ranking        # ranking (clips + title banner + filling 1..N list, clip audio) |
+                        # countdown (Top 10 with rank badges + narrator) | listicle (photos + narrator)
+  narrate: false        # ranking: also have Liam say a one-liner per clip
+  items: 6              # ranking ~6 (20-30s video); countdown 10
   item_min_s: 3.5
-  cuts_per_entry: 2     # footage cuts per entry, each with a zoom punch
+  cuts_per_entry: 1     # footage cuts per entry, each with a zoom punch (2 suits countdown)
   sfx: true             # whoosh/hit on every rank reveal
   source_db: -26        # footage's own audio under the narration (-100 = effectively mute)
   music: elevenlabs     # one continuous bed, start to end: elevenlabs (Music API, needs the
@@ -65,6 +68,6 @@ verify:                # fact-check gate for everything the narrator says (see R
   enabled: true
   strict: false        # true = also drop entries that couldn't be verified either way
   min_confidence: 0.5
-  min_entries: 7       # skip the Top-10 if fewer entries survive the check
+  min_entries: 4       # skip the video if fewer entries survive the check (7 for a Top 10)
   max_rounds: 2        # script rewrites to replace dropped entries
   check_hooks: true    # creator/trend clips: narrator hook must match the transcript
