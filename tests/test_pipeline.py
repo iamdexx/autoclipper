@@ -472,12 +472,10 @@ def test_narration_drops_the_engines_trailing_silence(tmp_path):
 def test_ytdlp_gets_cookies_and_proxy_from_the_environment(tmp_path, monkeypatch):
     from autoclipper import ingest
 
-    ingest._cookies_file.cache_clear()
     for k in ("YT_COOKIES", "YT_COOKIES_FILE", "YT_PROXY"):
         monkeypatch.delenv(k, raising=False)
     assert ingest.ytdlp("-J", "u") == ["yt-dlp", "-J", "u"]
 
-    ingest._cookies_file.cache_clear()
     monkeypatch.setenv(
         "YT_COOKIES", "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tA\tb"
     )
@@ -485,11 +483,11 @@ def test_ytdlp_gets_cookies_and_proxy_from_the_environment(tmp_path, monkeypatch
     cmd = ingest.ytdlp("-J", "u")
     assert cmd[:1] + cmd[3:] == ["yt-dlp", "--proxy", "http://u:p@host:8080", "-J", "u"]
     assert cmd[1] == "--cookies" and Path(cmd[2]).read_text().startswith("# Netscape")
+    assert oct(Path(cmd[2]).stat().st_mode)[-3:] == "600"
     assert ingest.ytdlp("x")[2] == cmd[2]  # written once, reused by every call
+    Path(cmd[2]).unlink()
 
-    ingest._cookies_file.cache_clear()
     f = tmp_path / "c.txt"
     f.write_text("x")
     monkeypatch.setenv("YT_COOKIES_FILE", str(f))
     assert ingest.ytdlp()[:3] == ["yt-dlp", "--cookies", str(f)]
-    ingest._cookies_file.cache_clear()

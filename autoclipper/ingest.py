@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import calendar
 import functools
 import json
@@ -22,21 +23,28 @@ log = logging.getLogger(__name__)
 YT_FEED = "https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
 
 
-@functools.lru_cache(maxsize=1)
+_cookie_tmp: Path | None = None
+
+
 def _cookies_file() -> str | None:
     """YouTube answers datacenter IPs (GitHub runners) with 'sign in to confirm you're not a bot';
     a logged-in browser's cookies get past it. YT_COOKIES_FILE = path to a Netscape cookies.txt,
-    or YT_COOKIES = its contents (the form a repo secret takes)."""
+    or YT_COOKIES = its contents (the form a repo secret takes), written once to a private temp
+    file that goes away with the process."""
+    global _cookie_tmp
     path = os.environ.get("YT_COOKIES_FILE")
     if path and Path(path).is_file():
         return path
     blob = os.environ.get("YT_COOKIES", "").strip()
     if not blob:
         return None
-    f = tempfile.NamedTemporaryFile("w", suffix=".txt", prefix="yt-cookies-", delete=False)
-    f.write(blob + "\n")
-    f.close()
-    return f.name
+    if _cookie_tmp is None or not _cookie_tmp.exists():
+        fd, name = tempfile.mkstemp(suffix=".txt", prefix="yt-cookies-")
+        with os.fdopen(fd, "w") as f:  # mkstemp => 0600, owner only
+            f.write(blob + "\n")
+        _cookie_tmp = Path(name)
+        atexit.register(lambda p=_cookie_tmp: p.unlink(missing_ok=True))
+    return str(_cookie_tmp)
 
 
 def ytdlp(*args: str) -> list[str]:
