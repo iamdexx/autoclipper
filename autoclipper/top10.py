@@ -265,8 +265,7 @@ def fetch_footage(entry: Entry, secs: float, dest: Path, cfg: Config) -> Path | 
     for c in cands[:3]:
         # skip the first ~20% (intros) and pull a window from there
         start = max(0.0, min(c.duration * 0.2, c.duration - secs - 1))
-        cmd = [
-            "yt-dlp",
+        cmd = ingest.ytdlp(
             "--no-playlist",
             "-f",
             "b[height<=720][ext=mp4]/bv*[height<=720][ext=mp4]+ba[ext=m4a]/b",
@@ -278,7 +277,7 @@ def fetch_footage(entry: Entry, secs: float, dest: Path, cfg: Config) -> Path | 
             "-o",
             str(out),
             c.url,
-        ]
+        )
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         if r.returncode == 0 and out.exists() and has_video(out):
             entry.video_id = c.id

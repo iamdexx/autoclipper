@@ -178,6 +178,12 @@ repo secrets `GEMINI_API_KEY`, `TIKTOK_REFRESH_TOKEN`, etc. and caches `data/sta
 runs. Fine for a couple of creators; use a VPS for heavy volume (whisper on a 3h stream takes a
 while on CPU — set `whisper_model: tiny` there or run on a GPU box).
 
+YouTube answers GitHub's datacenter IPs with *"Sign in to confirm you're not a bot"*, so downloads
+from Actions need one of: a `YT_COOKIES` secret holding a logged-in browser's cookies.txt (export
+with the "Get cookies.txt LOCALLY" extension while on youtube.com — use a throwaway Google account,
+the cookies act as that login), or a `YT_PROXY` secret (`http://user:pass@host:port`, any
+residential proxy). Locally the same are read from `YT_COOKIES_FILE=/path/cookies.txt` / `YT_PROXY`.
+
 ## Layout
 
 - `autoclipper/ingest.py` — channel feeds, yt-dlp download, whisper transcript

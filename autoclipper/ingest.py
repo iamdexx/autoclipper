@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import atexit
 import calendar
 import functools
 import json
 import logging
+import os
 import subprocess
+import tempfile
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -18,6 +21,40 @@ from .config import Config, Creator
 log = logging.getLogger(__name__)
 
 YT_FEED = "https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
+
+
+_cookie_tmp: Path | None = None
+
+
+def _cookies_file() -> str | None:
+    """YouTube answers datacenter IPs (GitHub runners) with 'sign in to confirm you're not a bot';
+    a logged-in browser's cookies get past it. YT_COOKIES_FILE = path to a Netscape cookies.txt,
+    or YT_COOKIES = its contents (the form a repo secret takes), written once to a private temp
+    file that goes away with the process."""
+    global _cookie_tmp
+    path = os.environ.get("YT_COOKIES_FILE")
+    if path and Path(path).is_file():
+        return path
+    blob = os.environ.get("YT_COOKIES", "").strip()
+    if not blob:
+        return None
+    if _cookie_tmp is None or not _cookie_tmp.exists():
+        fd, name = tempfile.mkstemp(suffix=".txt", prefix="yt-cookies-")
+        with os.fdopen(fd, "w") as f:  # mkstemp => 0600, owner only
+            f.write(blob + "\n")
+        _cookie_tmp = Path(name)
+        atexit.register(lambda p=_cookie_tmp: p.unlink(missing_ok=True))
+    return str(_cookie_tmp)
+
+
+def ytdlp(*args: str) -> list[str]:
+    """`yt-dlp` plus the env-driven access options every call needs (cookies, proxy)."""
+    cmd = ["yt-dlp"]
+    if cookies := _cookies_file():
+        cmd += ["--cookies", cookies]
+    if proxy := os.environ.get("YT_PROXY"):
+        cmd += ["--proxy", proxy]
+    return cmd + list(args)
 
 
 @dataclass
@@ -53,14 +90,13 @@ def resolve_channel_id(creator: Creator) -> str:
         raise ValueError(f"creator {creator.name} needs channel_id or handle")
     handle = creator.handle if creator.handle.startswith("@") else "@" + creator.handle
     out = subprocess.check_output(
-        [
-            "yt-dlp",
+        ytdlp(
             "--playlist-items",
             "0",
             "--print",
             "channel_id",
             f"https://www.youtube.com/{handle}/videos",
-        ],
+        ),
         text=True,
     ).strip()
     cid = out.splitlines()[0]
@@ -84,7 +120,7 @@ def latest_video_ids(creator: Creator, max_age_h: float | None = None) -> list[s
 
 
 def probe(url: str, creator_name: str) -> VideoMeta:
-    out = subprocess.check_output(["yt-dlp", "-J", "--no-playlist", url], text=True)
+    out = subprocess.check_output(ytdlp("-J", "--no-playlist", url), text=True)
     j = json.loads(out)
     return VideoMeta(
         id=j["id"],
@@ -103,8 +139,7 @@ def download(url: str, dest: Path, max_height: int = 1080) -> Path:
     if out.exists():
         return out
     subprocess.check_call(
-        [
-            "yt-dlp",
+        ytdlp(
             "--no-playlist",
             "-f",
             f"bv*[height<={max_height}][ext=mp4]+ba[ext=m4a]/b[height<={max_height}][ext=mp4]/b",
@@ -113,7 +148,7 @@ def download(url: str, dest: Path, max_height: int = 1080) -> Path:
             "-o",
             str(out),
             url,
-        ]
+        )
     )
     return out
 

@@ -467,3 +467,27 @@ def test_narration_drops_the_engines_trailing_silence(tmp_path):
     out = narrate._mp3_to_aac(mp3, tmp_path / "v.m4a")
     assert 1.05 < narrate.duration(out) < 1.35  # 1s of tone + the 0.15s kept
     assert not mp3.exists()
+
+
+def test_ytdlp_gets_cookies_and_proxy_from_the_environment(tmp_path, monkeypatch):
+    from autoclipper import ingest
+
+    for k in ("YT_COOKIES", "YT_COOKIES_FILE", "YT_PROXY"):
+        monkeypatch.delenv(k, raising=False)
+    assert ingest.ytdlp("-J", "u") == ["yt-dlp", "-J", "u"]
+
+    monkeypatch.setenv(
+        "YT_COOKIES", "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tA\tb"
+    )
+    monkeypatch.setenv("YT_PROXY", "http://u:p@host:8080")
+    cmd = ingest.ytdlp("-J", "u")
+    assert cmd[:1] + cmd[3:] == ["yt-dlp", "--proxy", "http://u:p@host:8080", "-J", "u"]
+    assert cmd[1] == "--cookies" and Path(cmd[2]).read_text().startswith("# Netscape")
+    assert oct(Path(cmd[2]).stat().st_mode)[-3:] == "600"
+    assert ingest.ytdlp("x")[2] == cmd[2]  # written once, reused by every call
+    Path(cmd[2]).unlink()
+
+    f = tmp_path / "c.txt"
+    f.write_text("x")
+    monkeypatch.setenv("YT_COOKIES_FILE", str(f))
+    assert ingest.ytdlp()[:3] == ["yt-dlp", "--cookies", str(f)]
