@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass, field
 
 import requests
 
-from . import rank
+from . import ingest, rank
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ def yt_search(query: str, n: int = 10, hot_today: bool = False) -> list[Candidat
     else:
         target = f"ytsearch{n}:{query}"
     out = subprocess.run(
-        ["yt-dlp", "--flat-playlist", "-J", "--playlist-end", str(n), target],
+        ingest.ytdlp("--flat-playlist", "-J", "--playlist-end", str(n), target),
         capture_output=True,
         text=True,
         timeout=120,
