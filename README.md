@@ -183,6 +183,9 @@ from Actions need one of: a `YT_COOKIES` secret holding a logged-in browser's co
 with the "Get cookies.txt LOCALLY" extension while on youtube.com — use a throwaway Google account,
 the cookies act as that login), or a `YT_PROXY` secret (`http://user:pass@host:port`, any
 residential proxy). Locally the same are read from `YT_COOKIES_FILE=/path/cookies.txt` / `YT_PROXY`.
+With a logged-in account YouTube only serves formats behind a JS challenge, so yt-dlp needs a JS
+runtime on PATH — the workflow installs Deno (`denoland/setup-deno`); locally `curl -fsSL
+https://deno.land/install.sh | sh`.
 
 ## Layout
 
