@@ -31,7 +31,10 @@ from .config import Config
 
 log = logging.getLogger(__name__)
 
-YT_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+YT_SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.readonly",  # `auth check`: channels.list(mine=True)
+]
 
 
 class PublishError(RuntimeError):
