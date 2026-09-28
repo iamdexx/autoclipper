@@ -351,6 +351,57 @@ def test_resolve_channel_id_uses_the_playlist_field(monkeypatch):
         ingest.resolve_channel_id(Creator("n", handle="@nobody"))
 
 
+def test_new_videos_dates_undated_uploads_and_applies_the_age_window(tmp_path, monkeypatch):
+    import time
+
+    from autoclipper import ingest
+    from autoclipper.config import Creator
+
+    cfg = _cfg(tmp_path)
+    cfg.max_video_age_h = 72
+    now = time.time()
+    cfg.creators = [Creator("A", channel_id="UCa"), Creator("B", channel_id="UCb"), Creator("C")]
+
+    def uploads(creator, limit=ingest.FEED_DEPTH):
+        if creator.name == "A":  # Data API: dated
+            return [("a-new", now - 3600), ("a-old", now - 100 * 3600), ("a-seen", now)]
+        if creator.name == "B":  # yt-dlp flat listing: undated
+            return [("b-new", None), ("b-old", None), ("b-gone", None), ("b-seen", None)]
+        raise ValueError("needs channel_id or handle")
+
+    dated = []
+
+    def times(ids):
+        dated.append(list(ids))
+        return {"b-new": now - 7200, "b-old": now - 200 * 3600}  # b-gone failed to extract
+
+    monkeypatch.setattr(ingest, "latest_uploads", uploads)
+    monkeypatch.setattr(ingest, "upload_times", times)
+    got = ingest.new_videos(cfg, lambda v: v.endswith("-seen"))
+    assert [(c.name, v) for c, v in got] == [("A", "a-new"), ("B", "b-new")]
+    assert dated == [["b-new", "b-old", "b-gone"]]  # one batched call, seen ids never re-probed
+
+
+def test_latest_uploads_falls_back_to_ytdlp_without_a_token(monkeypatch):
+    from autoclipper import ingest
+    from autoclipper.config import Creator
+
+    monkeypatch.setattr(ingest, "_uploads_via_api", lambda cid, limit: pytest_fail("no token"))
+    cmds = []
+
+    def fake(cmd, text):
+        cmds.append(cmd)
+        return "v1\nv2\n\n"
+
+    monkeypatch.setattr(ingest.subprocess, "check_output", fake)
+    assert ingest.latest_uploads(Creator("x", channel_id="UCx"), limit=5) == [
+        ("v1", None),
+        ("v2", None),
+    ]
+    assert "--flat-playlist" in cmds[0] and "1:5" in cmds[0]
+    assert cmds[0][-1] == "https://www.youtube.com/channel/UCx/videos"
+
+
 def test_publish_top10_templates(tmp_path):
     from autoclipper import publish
 

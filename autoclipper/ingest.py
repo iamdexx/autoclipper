@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import atexit
-import calendar
 import functools
 import json
 import logging
@@ -12,15 +11,14 @@ import subprocess
 import tempfile
 import time
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
-
-import feedparser
 
 from .config import Config, Creator
 
 log = logging.getLogger(__name__)
 
-YT_FEED = "https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
+FEED_DEPTH = 8  # newest uploads looked at per creator per run
 
 
 _cookie_tmp: Path | None = None
@@ -106,18 +104,77 @@ def resolve_channel_id(creator: Creator) -> str:
     return cid
 
 
-def latest_video_ids(creator: Creator, max_age_h: float | None = None) -> list[str]:
-    """Newest first. With max_age_h, uploads published earlier are left out so the first run on a
-    channel doesn't work through its whole back catalogue."""
+def latest_uploads(creator: Creator, limit: int = FEED_DEPTH) -> list[tuple[str, float | None]]:
+    """Newest first: (video id, publish time as epoch). YouTube's RSS feed used to serve this but
+    answers 404 now, so: the Data API's uploads playlist when the channel's OAuth token is around
+    (1 quota unit, exact dates), else yt-dlp's flat listing of the uploads tab, which has no dates
+    (None - see upload_times)."""
     cid = resolve_channel_id(creator)
-    feed = feedparser.parse(YT_FEED.format(cid=cid))
+    try:
+        return _uploads_via_api(cid, limit)
+    except Exception as e:  # no token / quota / API down: yt-dlp still works
+        log.info("%s: Data API unavailable (%s); listing uploads with yt-dlp", creator.name, e)
+    return [(v, None) for v in latest_video_ids(cid, limit)]
+
+
+def _uploads_via_api(cid: str, limit: int) -> list[tuple[str, float | None]]:
+    from googleapiclient.discovery import build
+
+    from .publish import youtube_auth
+
+    yt = build("youtube", "v3", credentials=youtube_auth(interactive=False), cache_discovery=False)
+    res = (
+        yt.playlistItems()
+        .list(part="contentDetails", playlistId="UU" + cid[2:], maxResults=min(limit, 50))
+        .execute()
+    )
     out = []
-    for e in feed.entries:
-        pub = e.get("published_parsed")
-        if max_age_h is not None and pub is not None:
-            if time.time() - calendar.timegm(pub) > max_age_h * 3600:
-                continue
-        out.append(e.yt_videoid)
+    for it in res.get("items", []):
+        cd = it["contentDetails"]
+        ts = None
+        if at := cd.get("videoPublishedAt"):
+            ts = datetime.fromisoformat(at.replace("Z", "+00:00")).timestamp()
+        out.append((cd["videoId"], ts))
+    return out
+
+
+def latest_video_ids(cid: str, limit: int = FEED_DEPTH) -> list[str]:
+    """Newest first, off the channel's uploads tab (same cookies/proxy as every other YouTube call)."""
+    out = subprocess.check_output(
+        ytdlp(
+            "--flat-playlist",
+            "--playlist-items",
+            f"1:{limit}",
+            "--print",
+            "id",
+            f"https://www.youtube.com/channel/{cid}/videos",
+        ),
+        text=True,
+    )
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def upload_times(ids: list[str]) -> dict[str, float]:
+    """Publish time (epoch) per video id, one yt-dlp call for the lot (a full extraction each, so
+    only for ids the flat listing left undated). Videos that fail to extract are simply absent."""
+    if not ids:
+        return {}
+    res = subprocess.run(
+        ytdlp(
+            "--ignore-errors",
+            "--no-playlist",
+            "--print",
+            "%(id)s %(timestamp)s",
+            *(f"https://www.youtube.com/watch?v={i}" for i in ids),
+        ),
+        text=True,
+        capture_output=True,
+    )
+    out: dict[str, float] = {}
+    for line in res.stdout.splitlines():
+        vid, _, ts = line.strip().partition(" ")
+        if vid in ids and ts.replace(".", "", 1).isdigit():
+            out[vid] = float(ts)
     return out
 
 
@@ -182,14 +239,25 @@ def transcribe(video: Path, cfg: Config, cache: Path) -> list[Segment]:
 
 
 def new_videos(cfg: Config, seen) -> list[tuple[Creator, str]]:
+    """Unseen uploads no older than max_video_age_h, newest first per creator - so the first run on
+    a channel doesn't work through its back catalogue."""
     found: list[tuple[Creator, str]] = []
+    cutoff = time.time() - cfg.max_video_age_h * 3600
     for c in cfg.creators:
         try:
-            ids = latest_video_ids(c, cfg.max_video_age_h)
+            times = {v: ts for v, ts in latest_uploads(c) if not seen(v)}
+            if undated := [v for v, ts in times.items() if ts is None]:
+                times.update(upload_times(undated))
         except Exception as e:  # network / bad handle: keep going with other creators
             log.warning("feed failed for %s: %s", c.name, e)
             continue
-        for vid in ids:
-            if not seen(vid):
-                found.append((c, vid))
+        fresh = [v for v, ts in times.items() if (ts or 0) >= cutoff]
+        log.info(
+            "%s: %d unseen uploads, %d within %gh",
+            c.name,
+            len(times),
+            len(fresh),
+            cfg.max_video_age_h,
+        )
+        found.extend((c, v) for v in fresh)
     return found
