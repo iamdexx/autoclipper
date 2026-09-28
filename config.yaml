@@ -1,11 +1,17 @@
 # Creators to watch. Every new upload/VOD >= min_duration_s gets clipped automatically.
 creators:
-  - name: Adin Ross
-    handle: "@AdinLive"
-    hashtags: ["#adinross", "#kick"]
   - name: Kai Cenat
     handle: "@KaiCenatLive"
     hashtags: ["#kaicenat", "#amp"]
+  - name: IShowSpeed
+    handle: "@LiveSpeedy"      # full-stream uploads (the main @IShowSpeed channel is edited vlogs)
+    hashtags: ["#ishowspeed", "#speed"]
+  - name: xQc
+    handle: "@xQcOW"
+    hashtags: ["#xqc", "#twitch"]
+  - name: Adin Ross
+    handle: "@adinross"
+    hashtags: ["#adinross", "#kick"]
 
 workdir: data
 whisper_model: base          # tiny/base/small/medium — bigger = better captions, slower
@@ -26,10 +32,12 @@ captions:
   words_per_line: 3 # highlight style only
 
 publishing:
-  dry_run: true              # flip to false once the platform credentials are set
-  youtube: true
-  tiktok: true
-  instagram: true
+  dry_run: false             # real posts; `true` only logs what would be posted
+  youtube: true              # YT_TOKEN_JSON secret (Clipverse-HQ)
+  tiktok: false              # enable once TIKTOK_* credentials exist (see README)
+  instagram: false           # enable once IG_* + PUBLIC_* credentials exist (see README)
+  max_per_day: 6             # per platform; YouTube's default API quota allows 6 uploads/day
+  min_gap_min: 150           # spread posts out; over-budget videos are kept as artifacts, not posted
 
 narration:
   provider: auto        # auto = edge (no key) > azure > google > elevenlabs > gemini > openai, next one when a call fails | off
@@ -76,7 +84,8 @@ top10:
 
 verify:                # fact-check gate for everything the narrator says (see README)
   enabled: true
-  strict: false        # true = also drop entries that couldn't be verified either way
+  strict: false        # true = also drop entries that couldn't be verified either way (creator hooks too)
+  strict_top10: true   # Top-N entries must be positively supported; the script is written from real headlines
   min_confidence: 0.5
   min_entries: 4       # skip the video if fewer entries survive the check (7 for a Top 10)
   max_rounds: 2        # script rewrites to replace dropped entries

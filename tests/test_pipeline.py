@@ -328,6 +328,29 @@ def pytest_fail(msg):
     raise AssertionError(msg)
 
 
+def test_resolve_channel_id_uses_the_playlist_field(monkeypatch):
+    import pytest
+
+    from autoclipper import ingest
+    from autoclipper.config import Creator
+
+    seen = {}
+
+    def fake(cmd, text):
+        seen["cmd"] = cmd
+        return "UCmDTrq0LNgPodDOFZiSbsww\n" if "@xQcOW/videos" in cmd[-1] else ""
+
+    monkeypatch.setattr(ingest.subprocess, "check_output", fake)
+    c = Creator("xQc", handle="xQcOW")
+    assert ingest.resolve_channel_id(c) == "UCmDTrq0LNgPodDOFZiSbsww" == c.channel_id
+    assert (
+        "playlist:channel_id" in seen["cmd"]
+        and "https://www.youtube.com/@xQcOW/videos" in seen["cmd"]
+    )
+    with pytest.raises(ValueError, match="could not resolve @nobody"):
+        ingest.resolve_channel_id(Creator("n", handle="@nobody"))
+
+
 def test_publish_top10_templates(tmp_path):
     from autoclipper import publish
 
@@ -348,6 +371,50 @@ def test_publish_only_and_force(tmp_path, monkeypatch):
     monkeypatch.setattr(publish, "publish_tiktok", lambda v, c: {"id": "x", "status": "ok"})
     res = publish.publish_all(tmp_path / "v.mp4", "h", "c", [], cfg, only="tiktok", force=True)
     assert res == {"tiktok": {"id": "x", "status": "ok"}}
+
+
+def test_publish_budget_caps_and_spaces_real_posts(tmp_path, monkeypatch):
+    from autoclipper import publish
+    from autoclipper.state import State
+
+    cfg = _cfg(tmp_path)
+    cfg.publishing.dry_run = False
+    cfg.publishing.youtube = True
+    cfg.publishing.max_per_day, cfg.publishing.min_gap_min = 2, 60
+    posted = []
+    monkeypatch.setattr(
+        publish,
+        "publish_youtube",
+        lambda v, t, d, tags: posted.append(t) or {"id": f"y{len(posted)}"},
+    )
+    st = State(tmp_path / "state.json")
+
+    def go(hook):
+        res = publish.publish_all(tmp_path / "v.mp4", hook, "c", [], cfg, state=st)
+        st.record_post("vid", "v.mp4", "youtube", res["youtube"])
+        return res["youtube"]
+
+    assert go("a")["id"] == "y1"
+    assert "min gap" in go("b")["skipped"]  # too soon after the first
+    st.data["posts"][0]["at"] -= 61 * 60  # ...an hour later it's fine
+    assert go("c")["id"] == "y2"
+    for p in st.data["posts"]:
+        p["at"] -= 61 * 60
+    assert "2/2 posts" in go("d")["skipped"]  # daily cap; skipped/dry-run rows don't count
+    for p in st.data["posts"]:
+        p["at"] -= 24 * 3600
+    assert go("e")["id"] == "y3"
+    assert posted == ["a | c #shorts", "c | c #shorts", "e | c #shorts"]
+    # force (manual `autoclipper publish`) ignores the budget
+    res = publish.publish_all(tmp_path / "v.mp4", "f", "c", [], cfg, state=st, force=True)
+    assert res["youtube"]["id"] == "y4"
+
+
+def test_config_goes_live_on_youtube_only():
+    cfg = Config.load(ROOT / "config.yaml")
+    p = cfg.publishing
+    assert not p.dry_run and p.youtube and not p.tiktok and not p.instagram
+    assert p.max_per_day == 6 and p.min_gap_min == 150
 
 
 def test_tiktok_privacy_downgrades_to_allowed(monkeypatch):

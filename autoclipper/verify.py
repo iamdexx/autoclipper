@@ -197,12 +197,12 @@ def check_claims(claims: list[tuple[str, str]], cfg: Config) -> list[Check]:
     return checks
 
 
-def passes(check: Check, cfg: Config) -> bool:
+def passes(check: Check, cfg: Config, strict: bool | None = None) -> bool:
     v = cfg.verify
     if check.verdict == "unsupported":
         return False
     if check.verdict == "unverifiable":
-        return not v.strict
+        return not (v.strict if strict is None else strict)
     return check.confidence >= v.min_confidence
 
 
