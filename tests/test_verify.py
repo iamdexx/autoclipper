@@ -42,6 +42,58 @@ def _script(n=10):
 def test_verify_config_loads():
     cfg = Config.load(ROOT / "config.yaml")
     assert cfg.verify.enabled and cfg.verify.min_entries == 4 and not cfg.verify.strict
+    assert cfg.verify.strict_top10
+
+
+def test_script_is_written_from_fetched_sources(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.top10.items, cfg.top10.style = 6, "ranking"
+    ev = [
+        verify.Evidence("news", "Bauman 62-yard pick-six seals it - ESPN", source="ESPN"),
+        verify.Evidence("youtube", "Oregon vs USC Highlights"),
+        verify.Evidence("youtube", "oregon vs usc highlights"),  # dup (case) dropped
+    ]
+    monkeypatch.setattr(verify, "gather", lambda q: list(ev) if "Oregon" in q else [])
+    prompts = []
+
+    def fake_llm(prompt, c):
+        prompts.append(prompt)
+        return json.dumps({"title": "Ranking", "intro": "", "hashtags": [], "entries": []})
+
+    monkeypatch.setattr(trends, "_llm", fake_llm)
+    top10.write_script("Oregon USC", "insane moments", cfg)
+    p = prompts[0]
+    assert "SOURCES" in p and "MUST be a moment that appears in" in p
+    assert "- [news] Bauman 62-yard pick-six seals it - ESPN (ESPN)" in p
+    assert p.count("Oregon vs USC Highlights") == 1 and "return fewer" in p
+    # nothing found (offline / obscure topic): the prompt simply has no sources block
+    monkeypatch.setattr(verify, "gather", lambda q: [])
+    top10.write_script("nothing", "", cfg)
+    assert "SOURCES" not in prompts[1]
+
+
+def test_top10_drops_unverifiable_entries_by_default(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.top10.items, cfg.verify.max_rounds, cfg.verify.min_entries = 6, 1, 2
+    _no_net(monkeypatch)
+    monkeypatch.setattr(top10, "write_script", lambda *a, **k: _script(6))
+
+    def fake_check(claims, c):
+        out = []
+        for claim, _ in claims:
+            invented = claim.startswith(("play 6:", "play 5:", "play 3:"))
+            out.append(verify.Check(claim, "unverifiable" if invented else "supported", 0.9))
+        return out
+
+    monkeypatch.setattr(verify, "check_claims", fake_check)
+    s = top10.verified_script("Oregon USC", "", cfg, tmp_path)
+    assert [e.name for e in s.entries] == ["play 4", "play 2", "play 1"]
+    assert [e.rank for e in s.entries] == [3, 2, 1]
+    # the old permissive behaviour is still one switch away
+    cfg.verify.strict_top10 = False
+    assert len(top10.verified_script("Oregon USC", "", cfg, tmp_path).entries) == 6
+    # ...and creator-clip hooks are unaffected by strict_top10 (they follow `strict`)
+    assert verify.passes(verify.Check("h", "unverifiable", 0.0), cfg)
 
 
 def test_google_news_parses_rss(monkeypatch):

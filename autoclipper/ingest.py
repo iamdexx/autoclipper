@@ -94,11 +94,13 @@ def resolve_channel_id(creator: Creator) -> str:
             "--playlist-items",
             "0",
             "--print",
-            "channel_id",
+            "playlist:channel_id",  # channel-level field; a bare `channel_id` is per video
             f"https://www.youtube.com/{handle}/videos",
         ),
         text=True,
     ).strip()
+    if not out.startswith("UC"):
+        raise ValueError(f"could not resolve {handle} to a channel id: {out[:200]!r}")
     cid = out.splitlines()[0]
     creator.channel_id = cid
     return cid

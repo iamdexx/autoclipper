@@ -63,7 +63,7 @@ def process_video(
             continue
         clips.append(out)
         if do_publish:
-            res = publish.publish_all(out, m.hook, creator.name, creator.hashtags, cfg)
+            res = publish.publish_all(out, m.hook, creator.name, creator.hashtags, cfg, state=state)
             for platform, r in res.items():
                 state.record_post(meta.id, out.name, platform, r)
 
@@ -175,7 +175,9 @@ def make_top10(
         return None
     state.mark_topic("top10", topic, status="done", video=out.name, title=script.title)
     if do_publish:
-        res = publish.publish_all(out, script.title, "", script.hashtags, cfg, kind="top10")
+        res = publish.publish_all(
+            out, script.title, "", script.hashtags, cfg, kind="top10", state=state
+        )
         for platform, r in res.items():
             state.record_post(f"top10:{key}", out.name, platform, r)
     return out

@@ -67,6 +67,11 @@ class Publishing:
     youtube: bool = False
     tiktok: bool = False
     instagram: bool = False
+    # Posting budget per platform (real posts only). YouTube's default API quota (10k units/day,
+    # 1600 per upload) allows 6 uploads a day; the gap spreads them out instead of dumping a
+    # whole run's videos at once. Videos over budget are kept (artifact) but not posted.
+    max_per_day: int = 6
+    min_gap_min: int = 150
     title_template: str = "{hook} | {creator} #shorts"
     caption_template: str = "{hook}\n\nclip from {creator}'s stream\n{hashtags}"
     top10_title_template: str = "{hook} #shorts"
@@ -92,6 +97,8 @@ class Verify:
 
     enabled: bool = True
     strict: bool = False  # True: 'unverifiable' entries are dropped too, not just 'unsupported'
+    strict_top10: bool = True  # Top-N entries must be positively supported (LLM-invented plays
+    # about recent events come back 'unverifiable', never 'unsupported'); hooks stay on `strict`
     min_confidence: float = 0.5  # 'supported' below this is treated as unverifiable
     min_entries: int = 4  # a video needs at least this many verified entries or it's skipped
     max_rounds: int = 2  # script (re)writes to fill dropped entries

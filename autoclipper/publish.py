@@ -28,6 +28,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import requests
 
 from .config import Config
+from .state import State
 
 log = logging.getLogger(__name__)
 
@@ -388,6 +389,18 @@ def check_credentials(cfg: Config) -> dict[str, str]:
 # ---------------- dispatcher ----------------
 
 
+def over_budget(platform: str, cfg: Config, state: State) -> str:
+    """Why a real post to `platform` must wait ('' if it may go out now): publishing.max_per_day
+    real posts in the last 24h, publishing.min_gap_min minutes since the last one."""
+    p = cfg.publishing
+    times = state.posted_at(platform)
+    if len(times) >= p.max_per_day:
+        return f"{len(times)}/{p.max_per_day} posts in the last 24h"
+    if times and (gap := (time.time() - times[-1]) / 60) < p.min_gap_min:
+        return f"last post {gap:.0f} min ago (min gap {p.min_gap_min})"
+    return ""
+
+
 def publish_all(
     video: Path,
     hook: str,
@@ -397,9 +410,11 @@ def publish_all(
     kind: str = "clip",
     only: str = "",
     force: bool = False,
+    state: State | None = None,
 ) -> dict[str, dict]:
     """kind: 'clip' (creator/trend clip) or 'top10' (own countdown video) - picks the templates.
-    only: restrict to one platform; force: post even when publishing.dry_run is on."""
+    only: restrict to one platform; force: post even when publishing.dry_run is on (and ignore
+    the posting budget); state: enables the per-platform posting budget (see over_budget)."""
     p = cfg.publishing
     tags = list(dict.fromkeys(p.default_hashtags + hashtags))
     if kind == "top10":
@@ -416,6 +431,10 @@ def publish_all(
         if p.dry_run and not force:
             log.info("[dry-run] would post %s to %s: %s", video.name, name, title)
             results[name] = {"dry_run": True, "title": title, "caption": caption}
+            continue
+        if state is not None and not force and (why := over_budget(name, cfg, state)):
+            log.info("budget: not posting %s to %s (%s)", video.name, name, why)
+            results[name] = {"skipped": why, "title": title}
             continue
         try:
             if name == "youtube":

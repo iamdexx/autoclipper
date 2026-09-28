@@ -44,3 +44,12 @@ class State:
             {"video": video_id, "clip": clip, "platform": platform, "at": time.time(), **result}
         )
         self.save()
+
+    def posted_at(self, platform: str, since_s: float = 24 * 3600) -> list[float]:
+        """Timestamps of real posts (not dry-run / failed / skipped) to `platform` in the window."""
+        cutoff = time.time() - since_s
+        return sorted(
+            p["at"]
+            for p in self.data["posts"]
+            if p["platform"] == platform and p.get("id") and p["at"] >= cutoff
+        )

@@ -113,12 +113,15 @@ Common to all:
 
 Nothing the narrator says goes out unchecked (`verify.py`):
 
-- **Top 10 entries** - for each entry we pull real evidence (Google News headlines, Wikipedia,
-  YouTube titles; no API keys) and the LLM judges the claim *only against that evidence*:
-  `supported` / `unsupported` / `unverifiable` + confidence + note. `unsupported` entries are
-  dropped (also `unverifiable` when `strict: true`), the script is rewritten to refill them
-  (`max_rounds`), and the video is skipped if fewer than `min_entries` survive. Full report with
-  sources: `data/top10/<slug>/factcheck.json`.
+- **Top 10 entries** - the script is written *from* real evidence: the same keyless retrieval
+  (Google News headlines, Wikipedia, YouTube titles) runs for the topic first and the LLM is told
+  to use only moments that appear in those sources (it can't know last night's game otherwise).
+  Then each entry is judged *only against evidence fetched for it*: `supported` / `unsupported` /
+  `unverifiable` + confidence + note. `unsupported` entries are dropped, and so are
+  `unverifiable` ones by default (`strict_top10: true` - an invented play about a real game comes
+  back unverifiable, never unsupported); the script is rewritten to refill them (`max_rounds`),
+  and the video is skipped if fewer than `min_entries` survive. Full report with sources:
+  `data/top10/<slug>/factcheck.json`.
 - **Footage** - a YouTube result is only used if its title actually names the entry (keyword
   overlap), so a random high-view video can't stand in for the narrated event.
 - **Creator / trend clips** - the narrator's hook is checked against the clip's own transcript;
@@ -147,7 +150,10 @@ published. `qa.enabled: false` turns the gate off.
 
 Everything is `dry_run: true` by default: clips render and the log shows what *would* be posted.
 Flip `publishing.dry_run: false` and set the credentials for the platforms you want. Only videos
-that pass the fact-check and quality gates ever reach this step.
+that pass the fact-check and quality gates ever reach this step, and only within the posting
+budget: at most `max_per_day` real posts per platform in any 24h and `min_gap_min` minutes
+between them (YouTube's default API quota is 10,000 units/day at 1,600 per upload, i.e. 6
+uploads). Videos over budget are still rendered and kept in the run's artifact, just not posted.
 
 ```bash
 autoclipper auth check                  # talks to each platform, prints the account it would post as

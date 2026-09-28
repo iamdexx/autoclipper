@@ -44,7 +44,7 @@ SCRIPT_PROMPT = """Write a viral "Top {n}" countdown short (TikTok / Reels / Sho
 Context: {angle}
 Rules: countdown from {n} to 1, best last. Every entry needs real footage findable on YouTube.
 Only REAL, well-documented events/facts - nothing invented; if unsure about a detail leave it out.
-{avoid}
+{sources}{avoid}
 Narration is read aloud by a hyped, fast-talking narrator: plain spoken words only, no emojis,
 hashtags, stage directions or rank numbers inside the sentences (the video shows the number).
 Style: the intro is a cold open that promises a payoff ("...and number one broke the internet");
@@ -66,7 +66,7 @@ Format: "{n} <things> that <hook>" - e.g. "{n} moments nobody expected this week
 one still photo on screen while a narrator says ONE short sentence about it, so every item must
 be something a real, findable photo can show (a person, a place, a play, a product, a scene).
 Only REAL, well-documented events/facts - nothing invented; if unsure about a detail leave it out.
-{avoid}
+{sources}{avoid}
 Narration is read aloud by a calm, confident narrator with no pauses between items: plain spoken
 words only, no emojis, hashtags, stage directions or numbering inside the sentences.
 Style: the intro is the title said as a hook (max 10 words), each line leads with the surprising
@@ -89,7 +89,7 @@ and a 1-{n} list on the left fills in with a 1-3 word label as each clip plays. 
 fast-talking narrator voices a cold-open hook and one line per clip over the footage, so every
 entry must be a specific moment findable as a YouTube video.
 Only REAL, well-documented moments - nothing invented; if unsure about a detail leave it out.
-{avoid}
+{sources}{avoid}
 Narration is plain spoken words only: no emojis, hashtags, stage directions or rank numbers
 inside the sentences (the video shows the number). Every line leads with the most shocking
 concrete detail and the last one or two tease toward number one.
@@ -106,9 +106,36 @@ Return ONLY JSON:
 
 _PROMPTS = {"countdown": SCRIPT_PROMPT, "listicle": LISTICLE_PROMPT, "ranking": RANKING_PROMPT}
 
+SOURCES_NOTE = """SOURCES - real headlines and video titles about this topic, fetched just now. Your own
+knowledge ends before recent events, so every entry MUST be a moment that appears in (or is
+directly implied by) these sources, and names/numbers must match them. Skip anything the sources don't
+mention rather than guessing. If the sources cover fewer than {n} distinct moments, return fewer.
+{items}
+"""
+
 
 def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:40] or "top10"
+
+
+def sources_for(topic: str, angle: str, n: int) -> str:
+    """Evidence block for the script prompt: the same keyless retrieval the fact-check judges
+    against (news, wiki, YouTube titles), so the writer picks moments that will later verify."""
+    ev = verify.gather(topic)
+    if angle and angle.lower() not in topic.lower():
+        ev += verify.gather(f"{topic} {angle}"[:120])
+    seen: set[str] = set()
+    items = []
+    for e in ev:
+        k = e.title.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        meta = " | ".join(x for x in (e.source, e.date) if x)
+        items.append(f"- [{e.kind}] {e.title[:160]}" + (f" ({meta})" if meta else ""))
+    if not items:
+        return ""
+    return SOURCES_NOTE.format(n=n, items="\n".join(items[:30]))
 
 
 def write_script(topic: str, angle: str, cfg: Config, avoid: list[str] | None = None) -> Script:
@@ -116,7 +143,11 @@ def write_script(topic: str, angle: str, cfg: Config, avoid: list[str] | None = 
     if avoid:
         note = "Do NOT use these (they failed a fact-check): " + "; ".join(avoid[:30])
     prompt = _PROMPTS.get(cfg.top10.style, SCRIPT_PROMPT)
-    raw = trends._llm(prompt.format(n=cfg.top10.items, topic=topic, angle=angle, avoid=note), cfg)
+    sources = sources_for(topic, angle, cfg.top10.items) if cfg.verify.enabled else ""
+    raw = trends._llm(
+        prompt.format(n=cfg.top10.items, topic=topic, angle=angle, avoid=note, sources=sources),
+        cfg,
+    )
     m = re.search(r"\{.*\}", raw, re.S)
     if not m:
         raise ValueError("no JSON in LLM output")
@@ -171,6 +202,7 @@ def verified_script(topic: str, angle: str, cfg: Config, vdir: Path) -> Script:
     """Write a script, drop entries that fail the fact-check, refill from a fresh draft (up to
     verify.max_rounds), re-rank 10..1. Raises if fewer than verify.min_entries survive."""
     v = cfg.verify
+    strict = v.strict or v.strict_top10
     script = first = write_script(topic, angle, cfg)
     if not v.enabled:
         return script
@@ -188,7 +220,7 @@ def verified_script(topic: str, angle: str, cfg: Config, vdir: Path) -> Script:
             if k in seen:
                 continue
             seen.add(k)
-            if verify.passes(c, cfg):
+            if verify.passes(c, cfg, strict=strict):
                 fresh.append(e)
             else:
                 rejected.append(e.name)
