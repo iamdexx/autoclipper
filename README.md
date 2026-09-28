@@ -195,7 +195,7 @@ https://deno.land/install.sh | sh`.
 
 ## Layout
 
-- `autoclipper/ingest.py` — channel feeds, yt-dlp download, whisper transcript
+- `autoclipper/ingest.py` — creator uploads (Data API / yt-dlp), yt-dlp download, whisper transcript
 - `autoclipper/rank.py` — candidate windows, LLM prompt + parsing, heuristic fallback
 - `autoclipper/trends.py` — Google Trends / YouTube hot search, LLM topic + source picking
 - `autoclipper/top10.py` — countdown script, footage fetch, segment render + concat
