@@ -76,9 +76,7 @@ class Publishing:
     caption_template: str = "{hook}\n\nclip from {creator}'s stream\n{hashtags}"
     top10_title_template: str = "{hook} #shorts"
     top10_caption_template: str = "{hook}\n\n{hashtags}"
-    default_hashtags: list[str] = field(
-        default_factory=lambda: ["#clips", "#stream", "#viral", "#fyp"]
-    )
+    default_hashtags: list[str] = field(default_factory=lambda: ["#shorts"])
 
 
 @dataclass

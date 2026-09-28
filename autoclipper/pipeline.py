@@ -6,7 +6,7 @@ import re
 from dataclasses import asdict
 from pathlib import Path
 
-from . import ingest, publish, qa, rank, render, top10, trends, verify
+from . import ingest, metadata, publish, qa, rank, render, top10, trends, verify
 from .config import Config, Creator
 from .state import State
 
@@ -63,7 +63,19 @@ def process_video(
             continue
         clips.append(out)
         if do_publish:
-            res = publish.publish_all(out, m.hook, creator.name, creator.hashtags, cfg, state=state)
+            pm = metadata.describe(
+                m.hook,
+                m.narration,
+                metadata.moment_transcript(segments, m.start, m.end),
+                meta.title,
+                meta.uploader or creator.name,
+                creator.hashtags,
+                cfg,
+            )
+            (vdir / "clips" / f"{out.stem}.post.json").write_text(json.dumps(asdict(pm), indent=2))
+            res = publish.publish_all(
+                out, m.hook, creator.name, creator.hashtags, cfg, state=state, meta=pm
+            )
             for platform, r in res.items():
                 state.record_post(meta.id, out.name, platform, r)
 
@@ -175,8 +187,19 @@ def make_top10(
         return None
     state.mark_topic("top10", topic, status="done", video=out.name, title=script.title)
     if do_publish:
+        pm = metadata.describe(
+            script.title,
+            script.intro,
+            metadata.top10_transcript(script),
+            topic,
+            "",
+            script.hashtags,
+            cfg,
+            kind="top10",
+        )
+        (vdir / "post.json").write_text(json.dumps(asdict(pm), indent=2))
         res = publish.publish_all(
-            out, script.title, "", script.hashtags, cfg, kind="top10", state=state
+            out, script.title, "", script.hashtags, cfg, kind="top10", state=state, meta=pm
         )
         for platform, r in res.items():
             state.record_post(f"top10:{key}", out.name, platform, r)

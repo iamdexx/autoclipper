@@ -639,3 +639,91 @@ def test_youtube_auth_manual_swaps_code_for_token_from_a_pasted_url(tmp_path, mo
     publish.youtube_auth(interactive=True, manual=True)
     assert fake.redirect_uri == "http://localhost:8765/"
     assert json.loads((tmp_path / "tok.json").read_text()) == {"refresh_token": "r"}
+
+
+def test_metadata_describe_writes_searchable_title_and_specific_tags(tmp_path, monkeypatch):
+    import json
+
+    from autoclipper import metadata
+
+    cfg = _cfg(tmp_path)
+    prompts = []
+
+    def llm(prompt, cfg):
+        prompts.append(prompt)
+        return json.dumps(
+            {
+                "title": "Will Ospreay vs Jon Moxley: The Injury That Silenced AEW All Out 2026 ",
+                "description": "Ospreay goes down in the title match.  \nClip from All Elite Wrestling.",
+                "hashtags": ["Will Ospreay", "#JonMoxley", "#aew", "#AEW", "#shorts", "#Wrestling"],
+            }
+        )
+
+    monkeypatch.setattr(metadata.trends, "_llm", llm)
+    pm = metadata.describe(
+        "Career Threatening Injury In The Ring",
+        "Wait for the arena to go quiet.",
+        "Ospreay is down, he's not moving.",
+        "Will Ospreay vs Jon Moxley - AEW All Out 2026",
+        "All Elite Wrestling",
+        ["#AEW", "#AllOut"],
+        cfg,
+    )
+    assert pm.title == "Will Ospreay vs Jon Moxley: The Injury That Silenced AEW All Out 2026"
+    assert pm.description.endswith("Clip from All Elite Wrestling.")
+    # #-prefixed, de-duplicated case-insensitively, topic tags appended, #shorts once and last
+    assert pm.hashtags == ["#WillOspreay", "#JonMoxley", "#aew", "#Wrestling", "#AllOut", "#shorts"]
+    p = prompts[0]
+    assert "Ospreay is down" in p and "All Elite Wrestling" in p and "Clip from" in p
+
+
+def test_metadata_falls_back_to_template_when_llm_is_off_or_thin(tmp_path, monkeypatch):
+    from autoclipper import metadata
+
+    cfg = _cfg(tmp_path)  # heuristic provider -> _llm raises
+    pm = metadata.describe("Big hook", "", "text", "Source Title", "Chan", ["#a"], cfg)
+    assert pm.title == "Big hook | Source Title"
+    assert pm.description == "Big hook\n\nSource Title\nClip from Chan."
+    assert pm.hashtags == ["#a", "#shorts"]
+    monkeypatch.setattr(metadata.trends, "_llm", lambda p, c: '{"title": "x", "description": ""}')
+    assert metadata.describe("Big hook", "", "t", "Source Title", "Chan", [], cfg).title == (
+        "Big hook | Source Title"
+    )
+    # top10: no credit line asked for, entries listed for the title to name them
+    seen = {}
+    monkeypatch.setattr(
+        metadata.trends,
+        "_llm",
+        lambda p, c: (
+            seen.setdefault("p", p)
+            and '{"title": "Top 5 Taylor Swift Moments Ranked", "description": "d", "hashtags": []}'
+        ),
+    )
+    pm = metadata.describe(
+        "Ranking Taylor",
+        "intro",
+        "#2 Grammys\n#1 Proposal",
+        "taylor swift",
+        "",
+        ["#ts"],
+        cfg,
+        kind="top10",
+    )
+    assert "No credit line" in seen["p"] and "#1 Proposal" in seen["p"]
+    assert pm.hashtags == ["#ts", "#shorts"]
+    assert (
+        metadata.clip_title("a " * 60).endswith("a") and len(metadata.clip_title("a " * 60)) <= 90
+    )
+
+
+def test_publish_all_uses_written_metadata_over_templates(tmp_path):
+    from autoclipper import publish
+    from autoclipper.metadata import PostMeta
+
+    cfg = _cfg(tmp_path)
+    cfg.publishing.dry_run = True
+    cfg.publishing.youtube = True
+    pm = PostMeta("Real Title", "What happens.\nClip from X.", ["#a", "#shorts"])
+    res = publish.publish_all(tmp_path / "v.mp4", "hook", "c", ["#zzz"], cfg, meta=pm)
+    assert res["youtube"]["title"] == "Real Title"
+    assert res["youtube"]["caption"] == "What happens.\nClip from X.\n\n#a #shorts"
