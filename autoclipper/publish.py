@@ -28,6 +28,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import requests
 
 from .config import Config
+from .metadata import PostMeta
 from .state import State
 
 log = logging.getLogger(__name__)
@@ -411,18 +412,25 @@ def publish_all(
     only: str = "",
     force: bool = False,
     state: State | None = None,
+    meta: PostMeta | None = None,
 ) -> dict[str, dict]:
     """kind: 'clip' (creator/trend clip) or 'top10' (own countdown video) - picks the templates.
     only: restrict to one platform; force: post even when publishing.dry_run is on (and ignore
-    the posting budget); state: enables the per-platform posting budget (see over_budget)."""
+    the posting budget); state: enables the per-platform posting budget (see over_budget);
+    meta: written title / description / hashtags (metadata.describe) instead of the templates."""
     p = cfg.publishing
-    tags = list(dict.fromkeys(p.default_hashtags + hashtags))
-    if kind == "top10":
-        title_t, caption_t = p.top10_title_template, p.top10_caption_template
+    if meta is not None:
+        tags = list(dict.fromkeys(meta.hashtags + p.default_hashtags))
+        title = meta.title
+        caption = f"{meta.description}\n\n{' '.join(tags)}"
     else:
-        title_t, caption_t = p.title_template, p.caption_template
-    title = title_t.format(hook=hook, creator=creator)
-    caption = caption_t.format(hook=hook, creator=creator, hashtags=" ".join(tags))
+        tags = list(dict.fromkeys(p.default_hashtags + hashtags))
+        if kind == "top10":
+            title_t, caption_t = p.top10_title_template, p.top10_caption_template
+        else:
+            title_t, caption_t = p.title_template, p.caption_template
+        title = title_t.format(hook=hook, creator=creator)
+        caption = caption_t.format(hook=hook, creator=creator, hashtags=" ".join(tags))
     results: dict[str, dict] = {}
     targets = [("youtube", p.youtube), ("tiktok", p.tiktok), ("instagram", p.instagram)]
     for name, enabled in targets:
