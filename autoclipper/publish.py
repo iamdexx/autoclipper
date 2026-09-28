@@ -31,7 +31,10 @@ from .config import Config
 
 log = logging.getLogger(__name__)
 
-YT_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+YT_SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube.readonly",  # `auth check`: channels.list(mine=True)
+]
 
 
 class PublishError(RuntimeError):
@@ -41,7 +44,9 @@ class PublishError(RuntimeError):
 # ---------------- YouTube ----------------
 
 
-def youtube_auth(interactive: bool = True):
+def youtube_auth(interactive: bool = True, manual: bool = False):
+    """`manual`: the browser is on another machine - print the consent URL, then take the URL the
+    browser lands on afterwards (http://localhost:.../?code=...) pasted back on stdin."""
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
@@ -60,7 +65,18 @@ def youtube_auth(interactive: bool = True):
             raise PublishError("YouTube not authorised: run `autoclipper auth youtube`")
         client = os.getenv("YT_CLIENT_SECRETS", "secrets/yt_client_secret.json")
         flow = InstalledAppFlow.from_client_secrets_file(client, YT_SCOPES)
-        creds = flow.run_local_server(port=0, open_browser=not os.getenv("HEADLESS"))
+        if manual:
+            os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")  # loopback http redirect
+            flow.redirect_uri = "http://localhost:8765/"
+            url, _ = flow.authorization_url(access_type="offline", prompt="consent")
+            print(f"Open this in a browser and sign in:\n\n{url}\n")
+            landed = input(
+                "Paste the full URL the browser ends up on (starts http://localhost:8765/): "
+            )
+            flow.fetch_token(authorization_response=landed.strip())
+            creds = flow.credentials
+        else:
+            creds = flow.run_local_server(port=0, open_browser=not os.getenv("HEADLESS"))
     token_path.parent.mkdir(parents=True, exist_ok=True)
     token_path.write_text(creds.to_json())
     return creds

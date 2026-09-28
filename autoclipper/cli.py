@@ -56,6 +56,11 @@ def main(argv: list[str] | None = None) -> int:
         default="https://localhost:8080/callback",
         help="tiktok: a redirect URI registered on your TikTok app",
     )
+    a.add_argument(
+        "--manual",
+        action="store_true",
+        help="youtube: browser is elsewhere; print the consent URL and paste the landing URL back",
+    )
 
     pb = sub.add_parser("publish", help="really post one finished video (ignores dry_run)")
     pb.add_argument("video")
@@ -163,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
             time.sleep(cfg.poll_interval_s)
     if args.cmd == "auth":
         if args.platform == "youtube":
-            publish.youtube_auth(interactive=True)
+            publish.youtube_auth(interactive=True, manual=args.manual)
             tok = os.getenv("YT_TOKEN", "secrets/yt_token.json")
             print(f"YouTube authorised. Token saved to {tok}.")
             print("For GitHub Actions, paste that file's contents into the YT_TOKEN_JSON secret.")

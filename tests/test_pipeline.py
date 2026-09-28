@@ -491,3 +491,33 @@ def test_ytdlp_gets_cookies_and_proxy_from_the_environment(tmp_path, monkeypatch
     f.write_text("x")
     monkeypatch.setenv("YT_COOKIES_FILE", str(f))
     assert ingest.ytdlp()[:3] == ["yt-dlp", "--cookies", str(f)]
+
+
+def test_youtube_auth_manual_swaps_code_for_token_from_a_pasted_url(tmp_path, monkeypatch):
+    import json
+
+    from autoclipper import publish
+
+    class FakeFlow:
+        redirect_uri = None
+
+        def authorization_url(self, **kw):
+            return "https://accounts.google.com/o/oauth2/auth?x=1", "state"
+
+        def fetch_token(self, authorization_response):
+            assert authorization_response == "http://localhost:8765/?code=abc&scope=s"
+            self.credentials = type(
+                "C", (), {"to_json": lambda self: json.dumps({"refresh_token": "r"})}
+            )()
+
+    fake = FakeFlow()
+    monkeypatch.setattr(
+        "google_auth_oauthlib.flow.InstalledAppFlow.from_client_secrets_file",
+        lambda client, scopes: fake,
+    )
+    monkeypatch.setenv("YT_TOKEN", str(tmp_path / "tok.json"))
+    monkeypatch.delenv("YT_TOKEN_JSON", raising=False)
+    monkeypatch.setattr("builtins.input", lambda _: " http://localhost:8765/?code=abc&scope=s \n")
+    publish.youtube_auth(interactive=True, manual=True)
+    assert fake.redirect_uri == "http://localhost:8765/"
+    assert json.loads((tmp_path / "tok.json").read_text()) == {"refresh_token": "r"}
