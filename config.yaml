@@ -37,7 +37,9 @@ publishing:
   tiktok: false              # enable once TIKTOK_* credentials exist (see README)
   instagram: false           # enable once IG_* + PUBLIC_* credentials exist (see README)
   max_per_day: 6             # per platform; YouTube's default API quota allows 6 uploads/day
-  min_gap_min: 150           # spread posts out; over-budget videos are kept as artifacts, not posted
+  min_gap_min: 150           # spread posts out; finished videos wait in data/queue for a slot
+  queue_max_age_h: 48        # the best-scoring queued video posts first; the rest age out
+  queue_max_items: 24
 
 narration:
   provider: auto        # auto = edge (no key) > azure > google > elevenlabs > gemini > openai, next one when a call fails | off

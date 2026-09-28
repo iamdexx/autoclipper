@@ -727,3 +727,115 @@ def test_publish_all_uses_written_metadata_over_templates(tmp_path):
     res = publish.publish_all(tmp_path / "v.mp4", "hook", "c", ["#zzz"], cfg, meta=pm)
     assert res["youtube"]["title"] == "Real Title"
     assert res["youtube"]["caption"] == "What happens.\nClip from X.\n\n#a #shorts"
+
+
+def _queue_cfg(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.publishing.dry_run = False
+    cfg.publishing.youtube = True
+    cfg.publishing.max_per_day, cfg.publishing.min_gap_min = 2, 60
+    return cfg
+
+
+def _enqueue(cfg, name, score, **kw):
+    from autoclipper import queue
+    from autoclipper.metadata import PostMeta
+
+    v = cfg.workdir / f"{name}.mp4"
+    v.write_bytes(b"x")
+    return queue.enqueue(
+        v, "clip", f"src-{name}", score, PostMeta(name, "d", ["#shorts"]), cfg, **kw
+    )
+
+
+def test_queue_posts_best_first_and_keeps_the_rest_for_later_runs(tmp_path, monkeypatch):
+    from autoclipper import publish, queue
+    from autoclipper.state import State
+
+    cfg = _queue_cfg(tmp_path)
+    posted = []
+    monkeypatch.setattr(
+        publish, "publish_youtube", lambda v, t, d, tags: posted.append(t) or {"id": t}
+    )
+    st = State(tmp_path / "state.json")
+    for name, score in [("meh", 3.0), ("best", 9.0), ("good", 7.0)]:
+        _enqueue(cfg, name, score)
+    (tmp_path / "best.mp4").unlink()  # the render dir is scratch; the queue has its own copy
+
+    # run 1: one slot open -> the strongest goes out, the other two wait
+    assert [it.meta.title for it in queue.drain(cfg, st)] == ["best"]
+    assert posted == ["best"]
+    assert [it.meta.title for it in queue.items(cfg)] == ["good", "meh"]
+    assert st.data["posts"][0]["video"] == "src-best" and st.data["posts"][0]["id"] == "best"
+
+    # run 2, right after: the gap blocks everything, nothing is lost and nothing re-posted
+    assert queue.drain(cfg, st) == []
+    assert posted == ["best"] and len(queue.items(cfg)) == 2
+
+    # run 3, an hour later: next best goes out, then the daily cap holds the last one
+    for p in st.data["posts"]:
+        if p.get("id"):
+            p["at"] -= 61 * 60
+    assert [it.meta.title for it in queue.drain(cfg, st)] == ["good"]
+    assert posted == ["best", "good"]
+    assert [it.meta.title for it in queue.items(cfg)] == ["meh"]
+    for p in st.data["posts"]:
+        if p.get("id"):
+            p["at"] -= 61 * 60
+    assert queue.drain(cfg, st) == [] and "posts" in publish.over_budget("youtube", cfg, st)
+
+
+def test_queue_prunes_stale_and_surplus_weakest_first(tmp_path):
+    from autoclipper import queue
+
+    cfg = _queue_cfg(tmp_path)
+    cfg.publishing.queue_max_items = 2
+    old = _enqueue(cfg, "old", 9.5)
+    old.added -= (cfg.publishing.queue_max_age_h + 1) * 3600
+    queue._save(cfg, old)
+    for name, score in [("a", 5.0), ("b", 8.0), ("c", 6.0)]:
+        _enqueue(cfg, name, score)
+    assert [it.meta.title for it in queue.prune(cfg)] == ["b", "c"]
+    assert [it.meta.title for it in queue.items(cfg)] == ["b", "c"]
+
+
+def test_queue_survives_a_missing_file_and_gives_up_after_repeated_errors(tmp_path, monkeypatch):
+    from autoclipper import publish, queue
+    from autoclipper.state import State
+
+    cfg = _queue_cfg(tmp_path)
+    cfg.publishing.min_gap_min = 0
+    st = State(tmp_path / "state.json")
+    it = _enqueue(cfg, "broken", 8.0)
+    (cfg.workdir / "queue" / it.id / it.video).unlink()  # corrupt entry is ignored, not fatal
+    assert queue.items(cfg) == []
+
+    _enqueue(cfg, "flaky", 8.0)
+
+    def boom(v, t, d, tags):
+        raise RuntimeError("quota")
+
+    monkeypatch.setattr(publish, "publish_youtube", boom)
+    for n in (1, 2):
+        assert queue.drain(cfg, st) == []
+        assert queue.items(cfg)[0].attempts == n
+    assert queue.drain(cfg, st) == [] and queue.items(cfg) == []
+    assert all("error" in p for p in st.data["posts"])
+
+
+def test_pipeline_enqueues_instead_of_posting_and_run_once_drains(tmp_path, monkeypatch):
+    from autoclipper import pipeline, queue
+
+    cfg = _queue_cfg(tmp_path)
+    monkeypatch.setattr(pipeline, "run_creators", lambda c, s: 0)
+    cfg.trends.enabled = cfg.top10.enabled = False
+    drained = []
+    monkeypatch.setattr(queue, "drain", lambda c, s, force=False: drained.append(True) or [])
+    pipeline.run_once(cfg, None)
+    assert drained == [True]
+    assert "publish.publish_all" not in (ROOT / "autoclipper" / "pipeline.py").read_text()
+
+
+def test_workflow_persists_queue_with_state():
+    wf = (ROOT / ".github" / "workflows" / "clip.yml").read_text()
+    assert wf.count("data/queue") == 2 and wf.count("data/state.json") == 2

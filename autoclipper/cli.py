@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import publish, qa, top10, trends, verify
+from . import publish, qa, queue, top10, trends, verify
 from .config import Config, Creator
 from .pipeline import make_top10, process_video, run_once, run_trends
 from .state import State
@@ -72,6 +72,9 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("status", help="show processed videos and posts")
 
+    qq = sub.add_parser("queue", help="show videos waiting for a posting slot (best first)")
+    qq.add_argument("--drain", action="store_true", help="post what the budget allows now")
+
     args = ap.parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -89,6 +92,8 @@ def main(argv: list[str] | None = None) -> int:
         clips = process_video(args.url, creator, cfg, state, do_publish=args.publish)
         for c in clips:
             print(c)
+        if args.publish:
+            queue.drain(cfg, state)
         return 0
     if args.cmd == "trends":
         found = trends.discover(cfg)
@@ -100,6 +105,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {tp.name}  q={tp.query!r}  {tp.angle}")
         if args.clip:
             run_trends(cfg, state, do_publish=args.publish)
+            if args.publish:
+                queue.drain(cfg, state)
         return 0
     if args.cmd == "top10":
         if args.topic:
@@ -114,6 +121,8 @@ def main(argv: list[str] | None = None) -> int:
         if not out:
             return 1
         print(out)
+        if args.publish:
+            queue.drain(cfg, state)
         return 0
     if args.cmd == "factcheck":
         p = Path(args.target)
@@ -207,6 +216,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{vid}  {v['status']:<18} {v.get('title', '')[:60]}")
         for p in state.data["posts"]:
             print(f"  -> {p['platform']:<10} {p['clip']}  {p.get('url') or p.get('id') or p}")
+        return 0
+    if args.cmd == "queue":
+        if args.drain:
+            queue.drain(cfg, state)
+        for it in queue.items(cfg):
+            print(f"{it.score:>5.2f}  {it.age_h:>4.1f}h  {it.kind:<5} {it.meta.title[:70]}")
+        for name in ("youtube", "tiktok", "instagram"):
+            if getattr(cfg.publishing, name):
+                print(f"{name}: {publish.over_budget(name, cfg, state) or 'slot open'}")
         return 0
     return 1
 
