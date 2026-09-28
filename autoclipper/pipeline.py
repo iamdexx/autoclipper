@@ -6,11 +6,14 @@ import re
 from dataclasses import asdict
 from pathlib import Path
 
-from . import ingest, metadata, publish, qa, rank, render, top10, trends, verify
+from . import ingest, metadata, qa, queue, rank, render, top10, trends, verify
 from .config import Config, Creator
 from .state import State
 
 log = logging.getLogger(__name__)
+
+# Queue priority for an original Top-N video, on the 0-10 scale rank.rank() scores clip moments.
+TOP10_SCORE = 7.0
 
 
 def _slug(s: str) -> str:
@@ -73,11 +76,17 @@ def process_video(
                 cfg,
             )
             (vdir / "clips" / f"{out.stem}.post.json").write_text(json.dumps(asdict(pm), indent=2))
-            res = publish.publish_all(
-                out, m.hook, creator.name, creator.hashtags, cfg, state=state, meta=pm
+            queue.enqueue(
+                out,
+                "clip",
+                meta.id,
+                m.score,
+                pm,
+                cfg,
+                hook=m.hook,
+                creator=creator.name,
+                hashtags=creator.hashtags,
             )
-            for platform, r in res.items():
-                state.record_post(meta.id, out.name, platform, r)
 
     state.mark_video(
         meta.id,
@@ -198,11 +207,16 @@ def make_top10(
             kind="top10",
         )
         (vdir / "post.json").write_text(json.dumps(asdict(pm), indent=2))
-        res = publish.publish_all(
-            out, script.title, "", script.hashtags, cfg, kind="top10", state=state, meta=pm
+        queue.enqueue(
+            out,
+            "top10",
+            f"top10:{key}",
+            TOP10_SCORE,
+            pm,
+            cfg,
+            hook=script.title,
+            hashtags=script.hashtags,
         )
-        for platform, r in res.items():
-            state.record_post(f"top10:{key}", out.name, platform, r)
     return out
 
 
@@ -219,9 +233,12 @@ def run_top10(cfg: Config, state: State) -> int:
 
 
 def run_once(cfg: Config, state: State) -> int:
+    """Make this run's videos, then post the best of everything waiting (this run's and earlier
+    runs') as far as the budget allows."""
     n = run_creators(cfg, state) if cfg.creators else 0
     if cfg.trends.enabled:
         n += run_trends(cfg, state)
     if cfg.top10.enabled:
         n += run_top10(cfg, state)
+    queue.drain(cfg, state)
     return n

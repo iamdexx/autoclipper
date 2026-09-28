@@ -153,7 +153,11 @@ Flip `publishing.dry_run: false` and set the credentials for the platforms you w
 that pass the fact-check and quality gates ever reach this step, and only within the posting
 budget: at most `max_per_day` real posts per platform in any 24h and `min_gap_min` minutes
 between them (YouTube's default API quota is 10,000 units/day at 1,600 per upload, i.e. 6
-uploads). Videos over budget are still rendered and kept in the run's artifact, just not posted.
+uploads). Every finished video goes into the posting queue (`data/queue`, cached between Actions
+runs together with the state); each run posts the best-scoring queued video(s) as far as the
+budget allows, and the rest wait - up to `queue_max_age_h` hours / `queue_max_items` entries
+(weakest dropped first). `autoclipper queue` shows what's waiting and whether a slot is open;
+`autoclipper queue --drain` posts now.
 
 ```bash
 autoclipper auth check                  # talks to each platform, prints the account it would post as

@@ -69,9 +69,12 @@ class Publishing:
     instagram: bool = False
     # Posting budget per platform (real posts only). YouTube's default API quota (10k units/day,
     # 1600 per upload) allows 6 uploads a day; the gap spreads them out instead of dumping a
-    # whole run's videos at once. Videos over budget are kept (artifact) but not posted.
+    # whole run's videos at once. Finished videos wait in workdir/queue and the best-scoring one
+    # is posted whenever a slot opens; the rest age out.
     max_per_day: int = 6
     min_gap_min: int = 150
+    queue_max_age_h: int = 48
+    queue_max_items: int = 24
     title_template: str = "{hook} | {creator} #shorts"
     caption_template: str = "{hook}\n\nclip from {creator}'s stream\n{hashtags}"
     top10_title_template: str = "{hook} #shorts"

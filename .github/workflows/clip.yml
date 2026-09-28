@@ -18,10 +18,12 @@ jobs:
           deno-version: v2.x
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
       - run: pip install -e .
-      - name: restore state
+      - name: restore state + posting queue
         uses: actions/cache/restore@v4
         with:
-          path: data/state.json
+          path: |
+            data/state.json
+            data/queue
           key: autoclipper-state-${{ github.run_id }}
           restore-keys: autoclipper-state-
       - run: autoclipper run
@@ -46,11 +48,13 @@ jobs:
           PUBLIC_S3_SECRET: ${{ secrets.PUBLIC_S3_SECRET }}
           YT_PRIVACY: ${{ vars.YT_PRIVACY || 'public' }}
           YT_TOKEN_JSON: ${{ secrets.YT_TOKEN_JSON }}
-      - name: save state
+      - name: save state + posting queue
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: data/state.json
+          path: |
+            data/state.json
+            data/queue
           key: autoclipper-state-${{ github.run_id }}
       - uses: actions/upload-artifact@v4
         if: always()
