@@ -91,6 +91,33 @@ def test_render_produces_vertical_mp4(tmp_path):
     assert (tmp_path / "clip.ass").read_text().count("Dialogue:") > 5
 
 
+def test_reframe_crops_to_the_face_or_the_middle_and_brands_every_video(tmp_path):
+    from autoclipper import reframe
+
+    cfg = _cfg(tmp_path)
+    cfg.look.watermark = "@Clipverse-HQ"
+    ass = tmp_path / "x.ass"
+    # crop mode fills the frame; the window follows the face and is clamped to the picture
+    vf = render._vf(ass, mode="crop", focus=0.8)
+    assert "force_original_aspect_ratio=increase" in vf and "boxblur" not in vf
+    assert "iw*0.8000-540" in vf and "max(0\\,min(iw-1080" in vf
+    assert "iw*0.5000" in render._vf(ass, mode="crop", focus=None)
+    assert "iw*1.0000" in render._vf(ass, mode="crop", focus=1.7)
+    assert "boxblur" in render._vf(ass, mode="blur")
+    # no face in a test pattern -> centre crop, and the handle sits on every frame
+    src = _src(tmp_path)
+    assert reframe.focus_x(src, 0.0, 6.0) is None
+    text = render.build_ass([], "HOOK", 6.0, cfg)
+    assert "Style: Brand," in text and ",Brand,,0,0,0,,{\\alpha&H40&}@Clipverse-HQ" in text
+    cfg.look.watermark = ""
+    assert ",Brand," not in render.build_ass([], "HOOK", 6.0, cfg)
+    cfg.look.reframe = "blur"
+    out = render.render_clip(
+        src, Moment(0.0, 6.0, "H", "r", 1.0), _segments(4), cfg, tmp_path / "b.mp4"
+    )
+    assert out.exists()
+
+
 def test_render_mixes_narration(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
     cfg.narration.provider = "gemini"

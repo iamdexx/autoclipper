@@ -6,7 +6,7 @@ import logging
 import subprocess
 from pathlib import Path
 
-from . import narrate
+from . import narrate, reframe
 from .config import Config
 from .ingest import Segment, Word
 from .rank import Moment
@@ -114,11 +114,15 @@ Style: Badge,{c.font},{int(c.size * 2.6)},{c.highlight_color},{c.highlight_color
 Style: Word,{c.font},{int(c.size * 1.45)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{c.outline + 1},3,2,60,60,660,1
 Style: Title,{c.font},{int(c.size * 1.35)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{c.outline + 1},3,8,60,60,150,1
 Style: Rank,{c.font},{int(c.size * 0.95)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{c.outline},2,7,70,60,560,1
+Style: Brand,{c.font},{int(c.size * 0.5)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,9,60,50,170,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     lines = list(events or [])
+    if cfg.look.watermark:
+        mark = "{\\alpha&H40&}" + _esc(cfg.look.watermark)
+        lines.append(f"Dialogue: 0,{_ts(0)},{_ts(dur)},Brand,,0,0,0,,{mark}")
     if badge:
         # pop-in: scale 40% -> 115% -> 100% over the first third of a second
         pop = "{\\fscx40\\fscy40\\t(0,220,\\fscx115\\fscy115)\\t(220,340,\\fscx100\\fscy100)}"
@@ -162,8 +166,16 @@ def _has_audio(path: Path) -> bool:
     return bool(out.stdout.strip())
 
 
-def _vf(ass_path: Path, src: str = "[0:v]", punch_at: list[float] | None = None) -> str:
-    """Vertical reframe: blurred, zoomed copy of the frame as background, sharp centre on top.
+def _vf(
+    ass_path: Path,
+    src: str = "[0:v]",
+    punch_at: list[float] | None = None,
+    mode: str = "crop",
+    focus: float | None = None,
+) -> str:
+    """Vertical reframe. `mode` crop: the picture is scaled to fill the 9:16 frame and cropped
+    around `focus` (0..1 horizontal centre, default the middle); blur: the full picture sits in
+    the middle over a blurred, zoomed copy of itself.
     `punch_at`: times (s) where the picture snaps in ~10% and settles back - a cut accent."""
     punch = ""
     if punch_at:
@@ -174,6 +186,14 @@ def _vf(ass_path: Path, src: str = "[0:v]", punch_at: list[float] | None = None)
             f"fps={FPS},zoompan=z='1+0.10*({terms})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
             f":d=1:s={W}x{H}:fps={FPS},"
         )
+    if mode == "crop":
+        cx = 0.5 if focus is None else min(1.0, max(0.0, focus))
+        # the crop window centred on the face, clamped to the scaled picture's edges
+        x = f"max(0\\,min(iw-{W}\\,iw*{cx:.4f}-{W // 2}))"
+        return (
+            f"{src}scale={W}:{H}:force_original_aspect_ratio=increase,"
+            f"crop={W}:{H}:{x}:(ih-{H})/2,{punch}ass={ass_path.as_posix()}[v]"
+        )
     return (
         f"{src}split=2[bg][fg];"
         f"[bg]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=20:5[bgb];"
@@ -181,6 +201,14 @@ def _vf(ass_path: Path, src: str = "[0:v]", punch_at: list[float] | None = None)
         f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2,{punch}"
         f"ass={ass_path.as_posix()}[v]"
     )
+
+
+def _frame(cfg: Config, source: Path, start: float, dur: float) -> dict:
+    """_vf keyword arguments for this clip: the configured mode and, when cropping, where the
+    speaker is in the footage."""
+    mode = cfg.look.reframe
+    focus = reframe.focus_x(source, start, dur) if mode == "crop" else None
+    return {"mode": mode, "focus": focus}
 
 
 def cut_plan(avail: float, dur: float, cuts: int) -> list[tuple[float, float]]:
@@ -251,7 +279,7 @@ def render_narrated(
     if src_audio:
         vf += "".join(f"[ca{i}]" for i in range(len(cuts)))
         vf += f"concat=n={len(cuts)}:v=0:a=1[srca];"
-    vf += _vf(ass_path, "[src]", punch_at)
+    vf += _vf(ass_path, "[src]", punch_at, **_frame(cfg, source, cuts[0][0], cuts[0][1]))
     inputs = ["-i", str(source)]
     duck = 10 ** ((cfg.narration.duck_db if duck_db is None else duck_db) / 20)
     pad = f"apad=whole_dur={dur:.3f},atrim=0:{dur:.3f}"
@@ -426,9 +454,10 @@ def render_clip(
     # otherwise the first frame is held
     pre = min(intro, moment.start)
     hold = intro - pre
-    vf = _vf(ass_path)
+    fr = _frame(cfg, source, moment.start, dur)
+    vf = _vf(ass_path, **fr)
     if hold > 0.01:
-        vf = f"[0:v]tpad=start_duration={hold:.3f}[hv];" + _vf(ass_path, src="[hv]")
+        vf = f"[0:v]tpad=start_duration={hold:.3f}[hv];" + _vf(ass_path, src="[hv]", **fr)
     inputs = ["-ss", f"{moment.start - pre:.3f}", "-t", f"{dur + pre:.3f}", "-i", str(source)]
     audio_map: list[str] = []
     if _has_audio(source):
