@@ -38,6 +38,7 @@ publishing:
   instagram: false           # enable once IG_* + PUBLIC_* credentials exist (see README)
   max_per_day: 6             # per platform; YouTube's default API quota allows 6 uploads/day
   min_gap_min: 150           # spread posts out; finished videos wait in data/queue for a slot
+  schedule_ahead_h: 12       # a run uploads queued videos as scheduled YouTube posts this far ahead
   queue_max_age_h: 48        # the best-scoring queued video posts first; the rest age out
   queue_max_items: 24
 
