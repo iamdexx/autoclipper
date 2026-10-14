@@ -119,6 +119,27 @@ def test_reframe_crops_to_the_face_or_the_middle_and_brands_every_video(tmp_path
     assert out.exists()
 
 
+def test_hook_card_pops_in_and_outlasts_a_short_intro(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.look.watermark = ""
+    ass = render.build_ass([], "BIG MOMENT", 10.0, cfg, hook_secs=max(1.2, render.HOOK_MIN_S))
+    hook = [ln for ln in ass.splitlines() if ",Hook," in ln]
+    assert len(hook) == 1 and "\\fscx40" in hook[0] and "BIG MOMENT" in hook[0]
+    assert hook[0].split(",")[2] == render._ts(render.HOOK_MIN_S)
+    # the hook style is the caption highlight colour so the first frame reads as one look
+    assert (
+        f"Style: Hook,{cfg.captions.font},{int(cfg.captions.size * 1.05)},{cfg.captions.highlight_color}"
+        in ass
+    )
+
+
+def test_heuristic_narration_is_one_line(tmp_path):
+    cfg = _cfg(tmp_path)
+    m = rank.rank_heuristic([(0.0, 6.0, "No way, he actually did it. Insane, bro!")], cfg)[0]
+    assert m.narration == f"{m.hook}." and len(m.narration.split()) <= 9
+    assert "max 9 words" in rank.PROMPT and "3-6 word" in rank.PROMPT
+
+
 def test_render_mixes_narration(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
     cfg.narration.provider = "gemini"

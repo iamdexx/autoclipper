@@ -57,7 +57,7 @@ narration:
   google_rate: 1.0
   gemini_voice: Puck    # Kore, Charon, Fenrir, Aoede, Leda ...
   duck_db: -14
-  max_len_s: 6
+  max_len_s: 3.5        # the narrator's hook: one line, then the clip; longer is sped up (max 1.3x) or dropped
 
 # Trend mode: scrape what's blowing up (Google Trends + fresh YouTube uploads per niche), let the
 # LLM pick topics that fit your niches, find the best source video and clip it like a stream.

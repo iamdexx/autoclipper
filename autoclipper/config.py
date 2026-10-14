@@ -67,7 +67,7 @@ class Narration:
     elevenlabs_voice: str = "TX3LPaxmHKxFdv7VOQHJ"  # "Liam"
     openai_voice: str = "onyx"
     duck_db: float = -14.0  # how far the stream audio drops under the narrator
-    max_len_s: float = 6.0
+    max_len_s: float = 3.5  # a Short has ~2s to earn the viewer; longer hooks are sped up
 
 
 @dataclass
