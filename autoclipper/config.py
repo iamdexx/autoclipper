@@ -103,6 +103,7 @@ class Trends:
     topics_per_run: int = 2
     min_duration_s: int = 120  # source videos for trend clips can be shorter than streams
     max_duration_s: int = 2 * 3600
+    max_source_age_h: float = 24  # never clip a source older than this when its age is known
 
 
 @dataclass

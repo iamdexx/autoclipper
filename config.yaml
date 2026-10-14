@@ -68,6 +68,7 @@ trends:
   topics_per_run: 2
   min_duration_s: 120
   max_duration_s: 7200
+  max_source_age_h: 24      # sources are searched freshest-first (last hour, today, any); older than this never
 
 # "Top 10 ..." countdown videos: LLM writes the list, narrator voices every entry over footage
 # pulled from YouTube, stitched into one vertical video with rank badges + captions.
