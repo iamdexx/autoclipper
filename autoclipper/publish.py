@@ -477,7 +477,11 @@ def publish_all(
         title = title_t.format(hook=hook, creator=creator)
         caption = caption_t.format(hook=hook, creator=creator, hashtags=" ".join(tags))
         if cta:
-            caption = caption.replace("\n" + " ".join(tags), cta + "\n" + " ".join(tags), 1)
+            tag_line = "\n" + " ".join(tags)
+            if tag_line in caption:
+                caption = caption.replace(tag_line, cta + tag_line, 1)
+            else:  # template keeps the hashtags inline: CTA goes last
+                caption += cta
     results: dict[str, dict] = {}
     targets = [("youtube", p.youtube), ("tiktok", p.tiktok), ("instagram", p.instagram)]
     for name, enabled in targets:

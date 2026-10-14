@@ -17,8 +17,7 @@ from .state import State
 
 log = logging.getLogger(__name__)
 
-SETTLE_H = 24  # a Short's first-day views decide whether the feed keeps pushing it
-RECHECK_H = 24
+SETTLE_H = 24  # a Short's first-day views decide whether the feed keeps pushing it; measured once
 MIN_POSTS = 3  # a label needs this many measured posts before it moves anything
 MIN_WEIGHT, MAX_WEIGHT = 0.5, 1.5
 
@@ -28,7 +27,8 @@ def _measurable(post: dict, now: float) -> bool:
         post.get("platform") == "youtube"
         and bool(post.get("id"))
         and post.get("at", now) <= now - SETTLE_H * 3600
-        and post.get("checked_at", 0) <= now - RECHECK_H * 3600
+        and "views" not in post  # one first-day reading per post, so posts of any age compare
+        and not post.get("missing")  # deleted / private on YouTube: don't ask again every run
     )
 
 
@@ -53,7 +53,7 @@ def fetch_stats(ids: list[str]) -> dict[str, dict]:
 
 
 def refresh(state: State) -> int:
-    """Record current view counts on every settled, not-recently-checked YouTube post."""
+    """Record first-day view counts on every settled YouTube post that has none yet."""
     now = time.time()
     due = [p for p in state.data["posts"] if _measurable(p, now)]
     if not due:
@@ -62,6 +62,8 @@ def refresh(state: State) -> int:
     for p in due:
         if p["id"] in stats:
             p.update(stats[p["id"]])
+        else:
+            p["missing"] = True
         p["checked_at"] = now
     state.save()
     log.info("analytics: refreshed %d posts (%d found)", len(due), len(stats))
@@ -107,12 +109,15 @@ def weight(
     if not base:
         return 1.0
     rep = report(state)
-    ratios = [
-        med / base
-        for lb in labels(creator, hashtags, kind)
-        if (hit := rep.get(lb)) and hit[0] >= MIN_POSTS
-        for _, med in [hit]
-    ]
+
+    def ratios(lbs: list[str]) -> list[float]:
+        return [rep[lb][1] / base for lb in lbs if lb in rep and rep[lb][0] >= MIN_POSTS]
+
+    # who / what it is about decides; a new creator or topic stays neutral rather than inheriting
+    # the format's record. The format (clip vs top10) only counts for posts that have nothing else.
+    ratios = (
+        ratios(labels(creator, hashtags)) if (creator or hashtags) else ratios(labels(kind=kind))
+    )
     if not ratios:
         return 1.0
     return round(min(MAX_WEIGHT, max(MIN_WEIGHT, statistics.median(ratios))), 2)
