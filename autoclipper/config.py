@@ -41,6 +41,15 @@ class CaptionStyle:
 
 
 @dataclass
+class Look:
+    # crop: the 16:9 source is scaled to fill the 9:16 frame and cropped to the speaker's face
+    # (centre when no face is found) - the picture fills the phone like every big clip channel.
+    # blur: the whole 16:9 picture sits in the middle over a blurred copy of itself.
+    reframe: str = "crop"
+    watermark: str = ""  # small channel handle in the top corner of every video, "" = none
+
+
+@dataclass
 class Narration:
     provider: str = "auto"  # auto | edge | azure | google | elevenlabs | gemini | openai | off
     edge_voice: str = (
@@ -177,6 +186,7 @@ class Config:
     llm_model: str | None = None
     clips: ClipRules = field(default_factory=ClipRules)
     captions: CaptionStyle = field(default_factory=CaptionStyle)
+    look: Look = field(default_factory=Look)
     publishing: Publishing = field(default_factory=Publishing)
     narration: Narration = field(default_factory=Narration)
     trends: Trends = field(default_factory=Trends)
@@ -193,6 +203,7 @@ class Config:
         creators = [Creator(**c) for c in raw.pop("creators", [])]
         clips = ClipRules(**raw.pop("clips", {}))
         captions = CaptionStyle(**raw.pop("captions", {}))
+        look = Look(**raw.pop("look", {}))
         publishing = Publishing(**raw.pop("publishing", {}))
         narration = Narration(**raw.pop("narration", {}))
         trends = Trends(**raw.pop("trends", {}))
@@ -205,6 +216,7 @@ class Config:
             workdir=workdir,
             clips=clips,
             captions=captions,
+            look=look,
             publishing=publishing,
             narration=narration,
             trends=trends,

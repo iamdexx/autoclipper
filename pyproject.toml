@@ -16,6 +16,7 @@ dependencies = [
   "google-auth-oauthlib>=1.2",
   "boto3>=1.35",
   "edge-tts>=7.0,<8",
+  "opencv-python-headless>=4.10,<5",
 ]
 
 [project.optional-dependencies]

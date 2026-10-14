@@ -31,6 +31,10 @@ captions:
   size: 64
   words_per_line: 3 # highlight style only
 
+look:
+  reframe: crop      # the picture fills the 9:16 frame, cropped to the speaker's face (blur = letterboxed over a blurred copy)
+  watermark: "@Clipverse-HQ"   # small handle in the top corner of every video
+
 publishing:
   dry_run: false             # real posts; `true` only logs what would be posted
   youtube: true              # YT_TOKEN_JSON secret (Clipverse-HQ)

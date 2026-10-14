@@ -23,6 +23,7 @@ def _cfg(tmp_path):
     cfg.workdir = tmp_path
     cfg.llm_provider = "heuristic"
     cfg.narration.provider = "off"
+    cfg.look.watermark = ""  # caption tests count Dialogue lines
     cfg.trends.topics_per_run = 1
     return cfg
 
