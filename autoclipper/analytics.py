@@ -28,6 +28,7 @@ def _measurable(post: dict, now: float) -> bool:
         and bool(post.get("id"))
         and post.get("at", now) <= now - SETTLE_H * 3600
         and "views" not in post  # one first-day reading per post, so posts of any age compare
+        and not post.get("missing")  # deleted / private on YouTube: don't ask again every run
     )
 
 
@@ -61,6 +62,8 @@ def refresh(state: State) -> int:
     for p in due:
         if p["id"] in stats:
             p.update(stats[p["id"]])
+        else:
+            p["missing"] = True
         p["checked_at"] = now
     state.save()
     log.info("analytics: refreshed %d posts (%d found)", len(due), len(stats))

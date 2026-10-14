@@ -899,6 +899,8 @@ def test_metadata_category_from_llm_or_keywords(tmp_path, monkeypatch):
         == "entertainment"
     )
     assert metadata.guess_category("UFC mma knockout in the title match") == "sports"
+    assert metadata.guess_category("tourist films a songbird at coachella, airy") == "entertainment"
+    assert metadata.guess_category("Steelers coach on the playoffs") == "sports"
     assert (
         metadata.fallback("Kai Cenat loses it", "Kai Cenat stream", "Kai", []).category == "gaming"
     )
@@ -1122,7 +1124,10 @@ def test_analytics_refresh_pulls_views_for_settled_posts_only(tmp_path, monkeypa
     monkeypatch.setattr(
         analytics,
         "fetch_stats",
-        lambda ids: asked.append(ids) or {"old": {"views": 77, "likes": 1, "comments": 0}},
+        lambda ids: (
+            asked.append(ids)
+            or {i: {"views": 77, "likes": 1, "comments": 0} for i in ids if i == "old"}
+        ),
     )
     assert analytics.refresh(st) == 1
     assert asked == [["old"]]
@@ -1130,6 +1135,11 @@ def test_analytics_refresh_pulls_views_for_settled_posts_only(tmp_path, monkeypa
     assert saved[0]["views"] == 77 and "views" not in saved[1] and saved[2]["views"] == 5
     assert analytics.refresh(st) == 0  # first-day reading already taken; never overwritten
     assert "fresh" not in asked[0]
+    # a video YouTube no longer returns (deleted / private) is asked about once, not every run
+    st.record_post("v5", "c", "youtube", {"id": "gone", "at": now - 48 * 3600})
+    assert analytics.refresh(st) == 0 and asked[-1] == ["gone"]
+    assert st.data["posts"][-1]["missing"] is True and "views" not in st.data["posts"][-1]
+    assert analytics.refresh(st) == 0 and asked[-1] == ["gone"] and len(asked) == 2
 
 
 def test_analytics_format_only_counts_without_creator_history(tmp_path):
