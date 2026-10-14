@@ -172,6 +172,7 @@ PICK_TOPICS = """You run a short-form video channel (TikTok / Reels / Shorts) ab
 Below are things trending right now. Pick the {n} that (a) fit the channel, (b) people will
 search / watch video about today, and (c) have real footage on YouTube to clip from.
 Skip anything already covered: {used}.
+{history}
 Return ONLY a JSON array, each item:
 {{"topic": "<trend name exactly as given>", "query": "<best YouTube search to find the key footage>",
   "angle": "<one sentence: why it's blowing up / what the clip should show>",
@@ -204,7 +205,11 @@ def _llm(prompt: str, cfg: Config) -> str:
     return call(prompt, cfg.llm_model)
 
 
-def pick_topics(topics: list[Topic], cfg: Config, used: list[str]) -> list[Topic]:
+def pick_topics(
+    topics: list[Topic], cfg: Config, used: list[str], history: str = ""
+) -> list[Topic]:
+    """`history`: analytics.summary() - what this channel's past Shorts did, so the picker leans
+    into what its viewers actually watch."""
     t = cfg.trends
     if not topics:
         return []
@@ -217,6 +222,7 @@ def pick_topics(topics: list[Topic], cfg: Config, used: list[str]) -> list[Topic
                 niches=", ".join(t.niches) or "anything viral",
                 n=t.topics_per_run,
                 used=", ".join(used[-50:]) or "nothing",
+                history=f"How this channel's past videos did: {history}" if history else "",
                 trending=listing,
             ),
             cfg,

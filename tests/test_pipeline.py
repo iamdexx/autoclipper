@@ -8,6 +8,7 @@ from autoclipper import narrate, qa, rank, render
 from autoclipper.config import Config
 from autoclipper.ingest import Segment, Word
 from autoclipper.rank import Moment
+from autoclipper.state import State
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -1038,6 +1039,86 @@ def test_pipeline_enqueues_instead_of_posting_and_run_once_drains(tmp_path, monk
     pipeline.run_once(cfg, None)
     assert drained == [True]
     assert "publish.publish_all" not in (ROOT / "autoclipper" / "pipeline.py").read_text()
+
+
+def _history(tmp_path, rows):
+    st = State(tmp_path / "state.json")
+    for i, (creator, tags, views) in enumerate(rows):
+        st.record_post(
+            f"v{i}",
+            "c.mp4",
+            "youtube",
+            {"id": f"y{i}", "views": views},
+            creator=creator,
+            hashtags=tags,
+            kind="clip",
+        )
+    return st
+
+
+def test_analytics_weights_by_what_got_watched(tmp_path):
+    from autoclipper import analytics
+
+    st = _history(
+        tmp_path,
+        [("penguinz0", ["#commentary", "#shorts"], v) for v in (300, 120, 90)]
+        + [("Kai Cenat", ["#kaicenat"], v) for v in (3, 8, 12)]
+        + [("NFL", ["#nfl"], v) for v in (150, 110, 100)],
+    )
+    assert analytics.channel_median(st) == 100
+    rep = analytics.report(st)
+    assert rep["creator:penguinz0"] == (3, 120) and rep["tag:#kaicenat"] == (3, 8)
+    assert "tag:#shorts" not in rep
+    assert analytics.weight(st, "penguinz0", ["#commentary"]) == 1.2
+    assert analytics.weight(st, "Kai Cenat", ["#kaicenat"]) == 0.5  # clamped
+    assert analytics.weight(st, "someone new", ["#new"]) == 1.0  # no history: untouched
+    assert analytics.weight(None, "x") == 1.0
+    one = _history(tmp_path / "one", [("a", ["#a"], 500)])
+    assert analytics.weight(one, "a", ["#a"]) == 1.0  # fewer than MIN_POSTS
+    s = analytics.summary(st)
+    assert (
+        "median is 100" in s and "penguinz0 (120" in s and "Flopped" in s and "kai cenat (8)" in s
+    )
+
+
+def test_analytics_refresh_pulls_views_for_settled_posts_only(tmp_path, monkeypatch):
+    from autoclipper import analytics
+
+    st = State(tmp_path / "state.json")
+    now = time.time()
+    st.record_post("v1", "c", "youtube", {"id": "old", "at": now - 48 * 3600})
+    st.record_post("v2", "c", "youtube", {"id": "fresh", "at": now - 3600})
+    st.record_post(
+        "v3",
+        "c",
+        "youtube",
+        {"id": "done", "at": now - 48 * 3600, "views": 5, "checked_at": now - 60},
+    )
+    st.record_post("v4", "c", "tiktok", {"id": "tt", "at": now - 48 * 3600})
+    asked = []
+    monkeypatch.setattr(
+        analytics,
+        "fetch_stats",
+        lambda ids: asked.append(ids) or {"old": {"views": 77, "likes": 1, "comments": 0}},
+    )
+    assert analytics.refresh(st) == 1
+    assert asked == [["old"]]
+    saved = json.loads((tmp_path / "state.json").read_text())["posts"]
+    assert saved[0]["views"] == 77 and "views" not in saved[1] and saved[2]["views"] == 5
+    assert analytics.refresh(st) == 0  # checked just now
+
+
+def test_queue_records_what_the_post_was_about(tmp_path, monkeypatch):
+    from autoclipper import publish, queue
+
+    cfg = _queue_cfg(tmp_path)
+    cfg.publishing.dry_run = False
+    monkeypatch.setattr(publish, "publish_youtube", lambda *a, **k: {"id": "y1"})
+    _enqueue(cfg, "a", 5.0, creator="NFL", hashtags=["#nfl"])
+    st = State(tmp_path / "state.json")
+    queue.drain(cfg, st)
+    p = st.data["posts"][0]
+    assert p["creator"] == "NFL" and p["hashtags"] == ["#nfl"] and p["kind"] == "clip"
 
 
 def test_workflow_persists_queue_with_state():
