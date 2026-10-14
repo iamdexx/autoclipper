@@ -8,6 +8,7 @@ from autoclipper import narrate, qa, rank, render
 from autoclipper.config import Config
 from autoclipper.ingest import Segment, Word
 from autoclipper.rank import Moment
+from autoclipper.state import State
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -117,6 +118,27 @@ def test_reframe_crops_to_the_face_or_the_middle_and_brands_every_video(tmp_path
         src, Moment(0.0, 6.0, "H", "r", 1.0), _segments(4), cfg, tmp_path / "b.mp4"
     )
     assert out.exists()
+
+
+def test_hook_card_pops_in_and_outlasts_a_short_intro(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.look.watermark = ""
+    ass = render.build_ass([], "BIG MOMENT", 10.0, cfg, hook_secs=max(1.2, render.HOOK_MIN_S))
+    hook = [ln for ln in ass.splitlines() if ",Hook," in ln]
+    assert len(hook) == 1 and "\\fscx40" in hook[0] and "BIG MOMENT" in hook[0]
+    assert hook[0].split(",")[2] == render._ts(render.HOOK_MIN_S)
+    # the hook style is the caption highlight colour so the first frame reads as one look
+    assert (
+        f"Style: Hook,{cfg.captions.font},{int(cfg.captions.size * 1.05)},{cfg.captions.highlight_color}"
+        in ass
+    )
+
+
+def test_heuristic_narration_is_one_line(tmp_path):
+    cfg = _cfg(tmp_path)
+    m = rank.rank_heuristic([(0.0, 6.0, "No way, he actually did it. Insane, bro!")], cfg)[0]
+    assert m.narration == f"{m.hook}." and len(m.narration.split()) <= 9
+    assert "max 9 words" in rank.PROMPT and "3-6 word" in rank.PROMPT
 
 
 def test_render_mixes_narration(tmp_path, monkeypatch):
@@ -465,7 +487,7 @@ def test_publish_budget_caps_and_spaces_real_posts(tmp_path, monkeypatch):
     monkeypatch.setattr(
         publish,
         "publish_youtube",
-        lambda v, t, d, tags, publish_at=None: posted.append(t) or {"id": f"y{len(posted)}"},
+        lambda v, t, d, tags, publish_at=None, **kw: posted.append(t) or {"id": f"y{len(posted)}"},
     )
     st = State(tmp_path / "state.json")
 
@@ -503,7 +525,7 @@ def test_publish_schedules_youtube_into_future_slots(tmp_path, monkeypatch):
     cfg.publishing.schedule_ahead_h = 1
     calls = []
 
-    def fake_upload(v, t, d, tags, publish_at=None):
+    def fake_upload(v, t, d, tags, publish_at=None, **kw):
         calls.append(publish_at)
         out = {"id": t}
         if publish_at and publish_at > time.time() + publish.SCHEDULE_MIN_AHEAD_S:
@@ -558,14 +580,18 @@ def test_publish_youtube_body_schedules_private_until_publish_at(tmp_path, monke
     monkeypatch.setattr("googleapiclient.http.MediaFileUpload", lambda *a, **k: object())
     (tmp_path / "v.mp4").write_bytes(b"x")
     later = time.time() + 3600
-    res = publish.publish_youtube(tmp_path / "v.mp4", "t", "d", ["#shorts"], publish_at=later)
+    res = publish.publish_youtube(
+        tmp_path / "v.mp4", "t", "d", ["#shorts"], publish_at=later, category="sports"
+    )
     assert bodies[0]["status"]["privacyStatus"] == "private"
+    assert bodies[0]["snippet"]["categoryId"] == "17"
     assert bodies[0]["status"]["publishAt"] == publish._rfc3339(later)
     assert res["at"] == later and res["scheduled"] == publish._rfc3339(later)
     res = publish.publish_youtube(tmp_path / "v.mp4", "t", "d", ["#shorts"], publish_at=None)
     assert (
         bodies[1]["status"]["privacyStatus"] == "public" and "publishAt" not in bodies[1]["status"]
     )
+    assert bodies[1]["snippet"]["categoryId"] == "24"
     assert "at" not in res
 
 
@@ -834,7 +860,44 @@ def test_publish_all_uses_written_metadata_over_templates(tmp_path):
     pm = PostMeta("Real Title", "What happens.\nClip from X.", ["#a", "#shorts"])
     res = publish.publish_all(tmp_path / "v.mp4", "hook", "c", ["#zzz"], cfg, meta=pm)
     assert res["youtube"]["title"] == "Real Title"
+    assert res["youtube"]["caption"] == (
+        "What happens.\nClip from X.\n\n" + cfg.publishing.cta + "\n\n#a #shorts"
+    )
+    cfg.publishing.cta = ""
+    res = publish.publish_all(tmp_path / "v.mp4", "hook", "c", ["#zzz"], cfg, meta=pm)
     assert res["youtube"]["caption"] == "What happens.\nClip from X.\n\n#a #shorts"
+
+
+def test_metadata_category_from_llm_or_keywords(tmp_path, monkeypatch):
+    import json
+
+    from autoclipper import metadata
+
+    cfg = _cfg(tmp_path)
+    good = {
+        "title": "Bills vs Rams: Josh Allen Overtime Winner",
+        "description": "x",
+        "hashtags": [],
+    }
+    monkeypatch.setattr(
+        metadata.trends, "_llm", lambda p, c: json.dumps({**good, "category": "Sports"})
+    )
+    assert metadata.describe("h", "", "", "s", "c", [], cfg).category == "sports"
+    # unknown / missing category -> keywords in the title, transcript and tags decide
+    monkeypatch.setattr(
+        metadata.trends, "_llm", lambda p, c: json.dumps({**good, "category": "vlog"})
+    )
+    assert (
+        metadata.describe("h", "", "touchdown in overtime", "s", "c", ["#nfl"], cfg).category
+        == "sports"
+    )
+    assert metadata.guess_category("xQc rages at a GTA RP cop on stream") == "gaming"
+    assert metadata.guess_category("a quiet day") == "entertainment"
+    assert (
+        metadata.fallback("Kai Cenat loses it", "Kai Cenat stream", "Kai", []).category == "gaming"
+    )
+    assert metadata.youtube_category_id("sports") == "17"
+    assert metadata.youtube_category_id("whatever") == "24"
 
 
 def _queue_cfg(tmp_path):
@@ -866,7 +929,7 @@ def test_queue_posts_best_first_and_keeps_the_rest_for_later_runs(tmp_path, monk
     monkeypatch.setattr(
         publish,
         "publish_youtube",
-        lambda v, t, d, tags, publish_at=None: posted.append(t) or {"id": t},
+        lambda v, t, d, tags, publish_at=None, **kw: posted.append(t) or {"id": t},
     )
     st = State(tmp_path / "state.json")
     for name, score in [("meh", 3.0), ("best", 9.0), ("good", 7.0)]:
@@ -906,7 +969,7 @@ def test_queue_drain_fills_the_coming_slots_with_scheduled_posts(tmp_path, monke
     cfg.publishing.max_per_day, cfg.publishing.schedule_ahead_h = 3, 12
     uploads = []
 
-    def fake_upload(v, t, d, tags, publish_at=None):
+    def fake_upload(v, t, d, tags, publish_at=None, **kw):
         uploads.append((t, publish_at))
         out = {"id": t}
         if publish_at > time.time() + publish.SCHEDULE_MIN_AHEAD_S:
@@ -976,6 +1039,86 @@ def test_pipeline_enqueues_instead_of_posting_and_run_once_drains(tmp_path, monk
     pipeline.run_once(cfg, None)
     assert drained == [True]
     assert "publish.publish_all" not in (ROOT / "autoclipper" / "pipeline.py").read_text()
+
+
+def _history(tmp_path, rows):
+    st = State(tmp_path / "state.json")
+    for i, (creator, tags, views) in enumerate(rows):
+        st.record_post(
+            f"v{i}",
+            "c.mp4",
+            "youtube",
+            {"id": f"y{i}", "views": views},
+            creator=creator,
+            hashtags=tags,
+            kind="clip",
+        )
+    return st
+
+
+def test_analytics_weights_by_what_got_watched(tmp_path):
+    from autoclipper import analytics
+
+    st = _history(
+        tmp_path,
+        [("penguinz0", ["#commentary", "#shorts"], v) for v in (300, 120, 90)]
+        + [("Kai Cenat", ["#kaicenat"], v) for v in (3, 8, 12)]
+        + [("NFL", ["#nfl"], v) for v in (150, 110, 100)],
+    )
+    assert analytics.channel_median(st) == 100
+    rep = analytics.report(st)
+    assert rep["creator:penguinz0"] == (3, 120) and rep["tag:#kaicenat"] == (3, 8)
+    assert "tag:#shorts" not in rep
+    assert analytics.weight(st, "penguinz0", ["#commentary"]) == 1.2
+    assert analytics.weight(st, "Kai Cenat", ["#kaicenat"]) == 0.5  # clamped
+    assert analytics.weight(st, "someone new", ["#new"]) == 1.0  # no history: untouched
+    assert analytics.weight(None, "x") == 1.0
+    one = _history(tmp_path / "one", [("a", ["#a"], 500)])
+    assert analytics.weight(one, "a", ["#a"]) == 1.0  # fewer than MIN_POSTS
+    s = analytics.summary(st)
+    assert (
+        "median is 100" in s and "penguinz0 (120" in s and "Flopped" in s and "kai cenat (8)" in s
+    )
+
+
+def test_analytics_refresh_pulls_views_for_settled_posts_only(tmp_path, monkeypatch):
+    from autoclipper import analytics
+
+    st = State(tmp_path / "state.json")
+    now = time.time()
+    st.record_post("v1", "c", "youtube", {"id": "old", "at": now - 48 * 3600})
+    st.record_post("v2", "c", "youtube", {"id": "fresh", "at": now - 3600})
+    st.record_post(
+        "v3",
+        "c",
+        "youtube",
+        {"id": "done", "at": now - 48 * 3600, "views": 5, "checked_at": now - 60},
+    )
+    st.record_post("v4", "c", "tiktok", {"id": "tt", "at": now - 48 * 3600})
+    asked = []
+    monkeypatch.setattr(
+        analytics,
+        "fetch_stats",
+        lambda ids: asked.append(ids) or {"old": {"views": 77, "likes": 1, "comments": 0}},
+    )
+    assert analytics.refresh(st) == 1
+    assert asked == [["old"]]
+    saved = json.loads((tmp_path / "state.json").read_text())["posts"]
+    assert saved[0]["views"] == 77 and "views" not in saved[1] and saved[2]["views"] == 5
+    assert analytics.refresh(st) == 0  # checked just now
+
+
+def test_queue_records_what_the_post_was_about(tmp_path, monkeypatch):
+    from autoclipper import publish, queue
+
+    cfg = _queue_cfg(tmp_path)
+    cfg.publishing.dry_run = False
+    monkeypatch.setattr(publish, "publish_youtube", lambda *a, **k: {"id": "y1"})
+    _enqueue(cfg, "a", 5.0, creator="NFL", hashtags=["#nfl"])
+    st = State(tmp_path / "state.json")
+    queue.drain(cfg, st)
+    p = st.data["posts"][0]
+    assert p["creator"] == "NFL" and p["hashtags"] == ["#nfl"] and p["kind"] == "clip"
 
 
 def test_workflow_persists_queue_with_state():

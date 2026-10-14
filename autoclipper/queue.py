@@ -140,7 +140,16 @@ def drain(cfg: Config, state: State, force: bool = False) -> list[Item]:
             meta=it.meta,
         )
         for platform, r in res.items():
-            state.record_post(it.source, it.video, platform, r)
+            state.record_post(
+                it.source,
+                it.video,
+                platform,
+                r,
+                creator=it.creator,
+                hashtags=it.hashtags,
+                kind=it.kind,
+                hook=it.hook,
+            )
         if res and all("skipped" in r for r in res.values()):
             break  # budget: nothing else can go out this run
         if any("skipped" in r for r in res.values()):

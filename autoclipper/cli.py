@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import publish, qa, queue, top10, trends, verify
+from . import analytics, publish, qa, queue, top10, trends, verify
 from .config import Config, Creator
 from .pipeline import make_top10, process_video, run_once, run_trends
 from .state import State
@@ -215,7 +215,16 @@ def main(argv: list[str] | None = None) -> int:
         for vid, v in state.data["videos"].items():
             print(f"{vid}  {v['status']:<18} {v.get('title', '')[:60]}")
         for p in state.data["posts"]:
-            print(f"  -> {p['platform']:<10} {p['clip']}  {p.get('url') or p.get('id') or p}")
+            views = f"{p['views']:>6} views  " if "views" in p else ""
+            print(
+                f"  -> {p['platform']:<10} {views}{p['clip']}  {p.get('url') or p.get('id') or p}"
+            )
+        if rep := analytics.report(state):
+            print(
+                f"\nperformance (median views/post, channel {analytics.channel_median(state):.0f}):"
+            )
+            for lb, (n, med) in sorted(rep.items(), key=lambda kv: -kv[1][1]):
+                print(f"  {med:>7.0f}  x{n:<3} {lb}")
         return 0
     if args.cmd == "queue":
         if args.drain:

@@ -43,8 +43,53 @@ Return ONLY JSON:
    deciding whether to watch. {credit}>",
  "hashtags": ["<5-8 tags, most specific first: the people, the event, the show/team, then the niche
    (e.g. #wrestling), then one or two broad ones that genuinely fit (#sports). No spaces, no
-   generic filler like #fyp #viral #clips #trending unless it truly fits.>"]}}
+   generic filler like #fyp #viral #clips #trending unless it truly fits.>"],
+ "category": "<where YouTube should file it, one of: {categories}>"}}
 """
+
+# YouTube video categories (videoCategories.list, US). The feed uses the category to decide who
+# gets the Short, so an NFL play filed under Entertainment competes with the wrong videos.
+CATEGORIES = {
+    "sports": "17",
+    "gaming": "20",
+    "comedy": "23",
+    "music": "10",
+    "news": "25",
+    "tech": "28",
+    "people": "22",
+    "entertainment": "24",
+}
+DEFAULT_CATEGORY = "entertainment"
+
+_CATEGORY_WORDS = {
+    "sports": r"nfl|nba|mlb|nhl|ufc|mma|boxing|wwe|aew|wrestl|touchdown|dunk|goal|knockout|"
+    r"playoff|quarterback|coach|highlights?|soccer|football|basketball|baseball|hockey|tennis|"
+    r"golf|f1|nascar|olympic|college|ncaa|premier league|champions league|home run|match",
+    "gaming": r"gta|twitch|stream(er|ing)?|fortnite|minecraft|valorant|warzone|call of duty|cod|"
+    r"speedrun|esports?|gamer|gaming|roblox|league of legends|nintendo|playstation|xbox|steam|"
+    r"gameplay|rp\b",
+    "music": r"concert|album|rapper|singer|tour|billboard|grammy|song|music",
+    "news": r"election|senate|congress|president|governor|court|verdict|policy|parliament|"
+    r"minister|breaking news|war|tariff",
+    "tech": r"iphone|apple|google|openai|chatgpt|nvidia|tesla|spacex|android|microsoft|\bai\b|"
+    r"robot|chip|software|startup",
+}
+
+
+def guess_category(*texts: str) -> str:
+    """Keyword fallback when the LLM gives no / an unknown category."""
+    blob = " ".join(t for t in texts if t).lower()
+    best, hits = DEFAULT_CATEGORY, 0
+    for name, pat in _CATEGORY_WORDS.items():
+        n = len(re.findall(pat, blob))
+        if n > hits:
+            best, hits = name, n
+    return best
+
+
+def youtube_category_id(name: str) -> str:
+    return CATEGORIES.get((name or "").lower(), CATEGORIES[DEFAULT_CATEGORY])
+
 
 KIND_NOTES = {
     "clip": "It's a clip cut from the source video below.",
@@ -62,6 +107,7 @@ class PostMeta:
     title: str
     description: str
     hashtags: list[str] = field(default_factory=list)
+    category: str = DEFAULT_CATEGORY  # key of CATEGORIES
 
 
 def _tag(h: str) -> str:
@@ -93,7 +139,8 @@ def fallback(hook: str, source_title: str, channel: str, hashtags: list[str]) ->
     """No LLM: hook + source name is still more searchable than the hook alone."""
     title = clip_title(f"{hook} | {source_title}" if source_title else hook)
     desc = f"{hook}\n\n{source_title}".strip() + (f"\nClip from {channel}." if channel else "")
-    return PostMeta(title, desc, clean_tags(hashtags))
+    tags = clean_tags(hashtags)
+    return PostMeta(title, desc, tags, guess_category(hook, source_title, channel, " ".join(tags)))
 
 
 def describe(
@@ -122,6 +169,7 @@ def describe(
                 narration=narration or "(none)",
                 transcript=transcript[:3000] or "(none)",
                 hashtags=" ".join(hashtags) or "(none)",
+                categories=", ".join(CATEGORIES),
             ),
             cfg,
         )
@@ -132,14 +180,17 @@ def describe(
         title = clip_title(j.get("title", ""))
         desc = re.sub(r"\s+\n", "\n", str(j.get("description", "")).strip())[:DESC_MAX]
         tags = clean_tags([str(h) for h in j.get("hashtags", [])] + hashtags)
+        category = str(j.get("category", "")).strip().lower()
+        if category not in CATEGORIES:
+            category = guess_category(title, desc, transcript[:1000], " ".join(tags))
     except Exception as e:  # metadata is best-effort; the template is always acceptable
         log.warning("metadata failed (%s); using template", e)
         return fb
     if len(title) < 12 or not desc:
         log.warning("metadata too thin (%r); using template", title)
         return fb
-    log.info("metadata: %r %s", title, " ".join(tags))
-    return PostMeta(title, desc, tags)
+    log.info("metadata: %r %s [%s]", title, " ".join(tags), category)
+    return PostMeta(title, desc, tags, category)
 
 
 def moment_transcript(segments, start: float, end: float) -> str:

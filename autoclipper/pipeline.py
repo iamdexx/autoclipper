@@ -6,7 +6,7 @@ import re
 from dataclasses import asdict
 from pathlib import Path
 
-from . import ingest, metadata, qa, queue, rank, render, top10, trends, verify
+from . import analytics, ingest, metadata, qa, queue, rank, render, top10, trends, verify
 from .config import Config, Creator
 from .state import State
 
@@ -54,6 +54,9 @@ def process_video(
 
     clips: list[Path] = []
     rejected: list[Path] = []
+    w = analytics.weight(state, creator.name, creator.hashtags, "clip")
+    if w != 1.0:
+        log.info("%s: queue scores x%.2f from how %s has performed", meta.id, w, creator.name)
     for i, m in enumerate(moments, 1):
         out = vdir / "clips" / f"{i:02d}-{_slug(m.hook)}.mp4"
         try:
@@ -80,7 +83,7 @@ def process_video(
                 out,
                 "clip",
                 meta.id,
-                m.score,
+                m.score * w,
                 pm,
                 cfg,
                 hook=m.hook,
@@ -147,7 +150,9 @@ def run_trends(cfg: Config, state: State, do_publish: bool = True) -> int:
     """Clip the best source video for each trending topic the LLM picks."""
     found = trends.discover(cfg)
     log.info("%d trending topics found", len(found))
-    picked = trends.pick_topics(found, cfg, state.used_topics("trend"))
+    picked = trends.pick_topics(
+        found, cfg, state.used_topics("trend"), history=analytics.summary(state)
+    )
     n = 0
     for tp in picked:
         state.mark_topic("trend", tp.name, status="picked", query=tp.query)
@@ -235,6 +240,11 @@ def run_top10(cfg: Config, state: State) -> int:
 def run_once(cfg: Config, state: State) -> int:
     """Make this run's videos, then post the best of everything waiting (this run's and earlier
     runs') as far as the budget allows."""
+    if state is not None:
+        try:
+            analytics.refresh(state)
+        except Exception as e:  # stats are a nice-to-have; never block a run on them
+            log.warning("analytics refresh failed: %s", e)
     n = run_creators(cfg, state) if cfg.creators else 0
     if cfg.trends.enabled:
         n += run_trends(cfg, state)

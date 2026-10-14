@@ -54,6 +54,11 @@ def _wrap(text: str, max_chars: int) -> list[str]:
 
 
 PAUSE_GAP = 0.5  # silence this long between two words starts a new caption line
+HOOK_MIN_S = (
+    3.0  # the on-screen hook stays at least this long, into the clip if the intro is shorter
+)
+# pop-in: scale 40% -> 115% -> 100% over the first third of a second
+POP = "{\\fscx40\\fscy40\\t(0,220,\\fscx115\\fscy115)\\t(220,340,\\fscx100\\fscy100)}"
 MIN_TAIL = 0.3  # a creator clip never ends closer than this to its last word
 UNDUCK_S = 0.6  # how long the footage audio takes to come back up after the narrator
 OUTRO_FADE_S = 0.5  # every video eases out over its last half second
@@ -109,7 +114,7 @@ WrapStyle: 0
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Cap,{c.font},{c.size},{c.base_color},{c.base_color},&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{c.outline},2,2,60,60,{c.margin_v},1
-Style: Hook,{c.font},{int(c.size * 0.85)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{c.outline},2,8,60,60,300,1
+Style: Hook,{c.font},{int(c.size * 1.05)},{c.highlight_color},{c.highlight_color},&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{c.outline + 1},3,8,60,60,300,1
 Style: Badge,{c.font},{int(c.size * 2.6)},{c.highlight_color},{c.highlight_color},&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{c.outline + 2},3,8,60,60,110,1
 Style: Word,{c.font},{int(c.size * 1.45)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{c.outline + 1},3,2,60,60,660,1
 Style: Title,{c.font},{int(c.size * 1.35)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,{c.outline + 1},3,8,60,60,150,1
@@ -124,12 +129,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         mark = "{\\alpha&H40&}" + _esc(cfg.look.watermark)
         lines.append(f"Dialogue: 0,{_ts(0)},{_ts(dur)},Brand,,0,0,0,,{mark}")
     if badge:
-        # pop-in: scale 40% -> 115% -> 100% over the first third of a second
-        pop = "{\\fscx40\\fscy40\\t(0,220,\\fscx115\\fscy115)\\t(220,340,\\fscx100\\fscy100)}"
-        lines.append(f"Dialogue: 0,{_ts(0)},{_ts(dur)},Badge,,0,0,0,,{pop}{_esc(badge)}")
+        lines.append(f"Dialogue: 0,{_ts(0)},{_ts(dur)},Badge,,0,0,0,,{POP}{_esc(badge)}")
     if hook:
         hook_text = "\\N".join(_esc(ln) for ln in _wrap(hook.upper(), c.hook_chars_per_line))
-        lines.append(f"Dialogue: 0,{_ts(0)},{_ts(min(dur, hook_secs))},Hook,,0,0,0,,{hook_text}")
+        end = _ts(min(dur, hook_secs))
+        lines.append(f"Dialogue: 0,{_ts(0)},{end},Hook,,0,0,0,,{POP}{hook_text}")
     if one_word:
         for k, w in enumerate(words):
             # hold until the next word, but never through a long pause
@@ -448,7 +452,7 @@ def render_clip(
         for w in words_in(segments, moment.start, moment.end)
     ]
     ass_path = out.with_suffix(".ass")
-    ass_path.write_text(build_ass(words, moment.hook, total, cfg, hook_secs=intro or 4.0))
+    ass_path.write_text(build_ass(words, moment.hook, total, cfg, hook_secs=max(intro, HOOK_MIN_S)))
 
     # the intro shows the footage leading into the moment (muted) when there is enough of it,
     # otherwise the first frame is held

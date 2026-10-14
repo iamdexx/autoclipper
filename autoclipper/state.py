@@ -39,9 +39,17 @@ class State:
         }
         self.save()
 
-    def record_post(self, video_id: str, clip: str, platform: str, result: dict) -> None:
+    def record_post(self, video_id: str, clip: str, platform: str, result: dict, **about) -> None:
+        """`about` (creator / hashtags / kind / hook) is what analytics groups performance by."""
         self.data["posts"].append(
-            {"video": video_id, "clip": clip, "platform": platform, "at": time.time(), **result}
+            {
+                "video": video_id,
+                "clip": clip,
+                "platform": platform,
+                "at": time.time(),
+                **about,
+                **result,
+            }
         )
         self.save()
 

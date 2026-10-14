@@ -103,7 +103,7 @@ def rank_heuristic(cands, cfg: Config) -> list[Moment]:
             _hook_from_text(t),
             "heuristic: energy/keywords",
             heuristic_score(t, e - s),
-            narration=f"You need to hear this. {_hook_from_text(t)}.",
+            narration=f"{_hook_from_text(t)}.",
         )
         for s, e, t in cands
     ]
@@ -124,12 +124,13 @@ def _dedupe(moments: list[Moment], n: int) -> list[Moment]:
 
 PROMPT = """You are a professional short-form clipper for TikTok / Reels / Shorts.
 Below is a timestamped transcript of a livestream by {creator}. Pick the {n} moments with the
-highest viral potential: strong hooks in the first 3 seconds, emotional spikes, hot takes, drama,
-laughter, money/numbers, controversy, or a clear story with payoff. Each clip must be between
-{min_len} and {max_len} seconds, must start at a natural sentence beginning and end on a payoff.
+highest viral potential: the action or the line that matters starts within the first 2 seconds
+(no run-up, no context), emotional spikes, hot takes, drama, laughter, money/numbers,
+controversy, or a clear story with payoff. Each clip must be between {min_len} and {max_len}
+seconds, must start right where it gets good (a natural sentence beginning) and end on a payoff.
 Return ONLY a JSON array, no prose, each item:
-{{"start": <seconds float>, "end": <seconds float>, "hook": "<punchy 4-9 word on-screen title>",
-  "narration": "<1-2 short punchy sentences (max 18 words) an excited narrator says before the clip to make viewers stay, e.g. 'Wait for what he says about his boss!' Plain spoken words only: no stage directions, hashtags or emojis.>",
+{{"start": <seconds float>, "end": <seconds float>, "hook": "<punchy 3-6 word on-screen title>",
+  "narration": "<ONE short punchy sentence (max 9 words) an excited narrator says before the clip so viewers stay, e.g. 'Wait for what he says about his boss.' Plain spoken words only: no stage directions, hashtags or emojis.>",
   "reason": "<one sentence>", "score": <0-10>}}
 
 TRANSCRIPT:

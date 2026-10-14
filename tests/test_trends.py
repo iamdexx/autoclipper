@@ -50,21 +50,71 @@ def test_google_trends_parsing(monkeypatch):
 
 
 def test_yt_search_parses_flat_playlist(monkeypatch):
+    import time
+
     payload = {
         "entries": [
-            {"id": "abc", "title": "T", "channel": "C", "duration": 61, "view_count": 12},
+            {
+                "id": "abc",
+                "title": "T",
+                "channel": "C",
+                "duration": 61,
+                "view_count": 12,
+                "timestamp": time.time() - 2 * 3600,
+            },
+            {"id": "old", "title": "T", "channel": "C", "duration": 61, "view_count": 1},
             None,
             {"id": None},
         ]
     }
+    targets = []
 
     def fake_run(cmd, **kw):
-        assert "--flat-playlist" in cmd
+        assert "--flat-playlist" in cmd and "youtubetab:approximate_date" in cmd
+        targets.append(cmd[-1])
         return subprocess.CompletedProcess(cmd, 0, json.dumps(payload), "")
 
     monkeypatch.setattr(trends.subprocess, "run", fake_run)
     got = trends.yt_search("x", 3)
-    assert len(got) == 1 and got[0].url.endswith("abc") and got[0].views == 12
+    assert len(got) == 2 and got[0].url.endswith("abc") and got[0].views == 12
+    assert 1.9 < got[0].age_h < 2.1 and got[1].age_h is None
+    trends.yt_search("x", 3, within="hour")
+    assert targets[0].startswith("ytsearch3:") and "sp=CAISBAgBEAE" in targets[1]
+
+
+def test_find_sources_prefers_the_freshest_window_and_drops_stale_videos(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.trends.min_duration_s = 100
+    cfg.trends.max_source_age_h = 24
+    by_window = {
+        "hour": [Candidate("h1", "t", "c", 600, 10, age_h=0.5)],
+        "today": [
+            Candidate("h1", "t", "c", 600, 10, age_h=0.5),  # already seen
+            Candidate("d1", "t", "c", 600, 5000, age_h=6),
+            Candidate("short", "t", "c", 30, 10**9, age_h=1),
+        ],
+        "": [
+            Candidate("stale", "t", "c", 600, 10**6, age_h=90),
+            Candidate("unknown", "t", "c", 600, 100),
+        ],
+    }
+    asked = []
+
+    def search(q, n=10, within=""):
+        asked.append(within)
+        return by_window[within]
+
+    monkeypatch.setattr(trends, "yt_search", search)
+    pool = trends.find_sources(Topic("x", "g"), cfg)
+    assert asked == ["hour", "today", ""]  # kept widening until it had a pool
+    assert [c.id for c in pool] == ["h1", "d1", "unknown"]
+    # the fallback pick is the freshest, not the most viewed
+    assert trends.pick_source(Topic("x", "g"), cfg).id == "h1"
+    # a fresh window with enough videos ends the search
+    by_window["hour"] = [Candidate(f"h{i}", "t", "c", 600, i, age_h=0.2) for i in range(3)]
+    asked.clear()
+    trends.find_sources(Topic("x", "g"), cfg)
+    assert asked == ["hour"]
 
 
 def test_discover_dedupes_and_survives_failures(tmp_path, monkeypatch):
@@ -110,7 +160,7 @@ def test_pick_source_filters_duration_and_falls_back(tmp_path, monkeypatch):
         Candidate("best", "b", "c", 700, 5000),
     ]
     monkeypatch.setattr(trends, "yt_search", lambda q, n=10, **kw: cands)
-    assert trends.pick_source(Topic("x", "g"), cfg).id == "best"
+    assert trends.pick_source(Topic("x", "g"), cfg).id == "best"  # no ages known: most viewed
     monkeypatch.setattr(trends, "_llm", lambda p, c: '{"id": "ok"}')
     assert trends.pick_source(Topic("x", "g"), cfg).id == "ok"
 

@@ -45,6 +45,7 @@ publishing:
   schedule_ahead_h: 12       # a run uploads queued videos as scheduled YouTube posts this far ahead
   queue_max_age_h: 48        # the best-scoring queued video posts first; the rest age out
   queue_max_items: 24
+  cta: "Subscribe to Clipverse HQ for the best moments from streams, sports and the internet, every day."
 
 narration:
   provider: auto        # auto = edge (no key) > azure > google > elevenlabs > gemini > openai, next one when a call fails | off
@@ -56,7 +57,7 @@ narration:
   google_rate: 1.0
   gemini_voice: Puck    # Kore, Charon, Fenrir, Aoede, Leda ...
   duck_db: -14
-  max_len_s: 6
+  max_len_s: 3.5        # the narrator's hook: one line, then the clip; longer is sped up (max 1.3x) or dropped
 
 # Trend mode: scrape what's blowing up (Google Trends + fresh YouTube uploads per niche), let the
 # LLM pick topics that fit your niches, find the best source video and clip it like a stream.
@@ -67,6 +68,7 @@ trends:
   topics_per_run: 2
   min_duration_s: 120
   max_duration_s: 7200
+  max_source_age_h: 24      # sources are searched freshest-first (last hour, today, any); older than this never
 
 # "Top 10 ..." countdown videos: LLM writes the list, narrator voices every entry over footage
 # pulled from YouTube, stitched into one vertical video with rank badges + captions.

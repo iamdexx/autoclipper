@@ -27,6 +27,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
 
+from . import metadata
 from .config import Config
 from .metadata import PostMeta
 from .state import State
@@ -88,10 +89,16 @@ def youtube_auth(interactive: bool = True, manual: bool = False):
 
 
 def publish_youtube(
-    video: Path, title: str, description: str, tags: list[str], publish_at: float | None = None
+    video: Path,
+    title: str,
+    description: str,
+    tags: list[str],
+    publish_at: float | None = None,
+    category: str = metadata.DEFAULT_CATEGORY,
 ) -> dict:
     """`publish_at` (epoch) in the future: uploaded now as private with YouTube's own scheduler
-    flipping it public at that time - so one run can fill every posting slot until the next."""
+    flipping it public at that time - so one run can fill every posting slot until the next.
+    `category`: a metadata.CATEGORIES key (sports / gaming / ...), what the feed files it under."""
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
 
@@ -109,7 +116,7 @@ def publish_youtube(
             "title": title[:100],
             "description": description[:5000],
             "tags": [t.lstrip("#") for t in tags][:30],
-            "categoryId": "24",
+            "categoryId": metadata.youtube_category_id(category),
         },
         "status": status,
     }
@@ -456,10 +463,11 @@ def publish_all(
     the posting budget); state: enables the per-platform posting budget (see over_budget);
     meta: written title / description / hashtags (metadata.describe) instead of the templates."""
     p = cfg.publishing
+    cta = f"\n\n{p.cta.strip()}" if p.cta.strip() else ""
     if meta is not None:
         tags = list(dict.fromkeys(meta.hashtags + p.default_hashtags))
         title = meta.title
-        caption = f"{meta.description}\n\n{' '.join(tags)}"
+        caption = f"{meta.description}{cta}\n\n{' '.join(tags)}"
     else:
         tags = list(dict.fromkeys(p.default_hashtags + hashtags))
         if kind == "top10":
@@ -468,6 +476,8 @@ def publish_all(
             title_t, caption_t = p.title_template, p.caption_template
         title = title_t.format(hook=hook, creator=creator)
         caption = caption_t.format(hook=hook, creator=creator, hashtags=" ".join(tags))
+        if cta:
+            caption = caption.replace("\n" + " ".join(tags), cta + "\n" + " ".join(tags), 1)
     results: dict[str, dict] = {}
     targets = [("youtube", p.youtube), ("tiktok", p.tiktok), ("instagram", p.instagram)]
     for name, enabled in targets:
@@ -488,7 +498,14 @@ def publish_all(
                 continue
         try:
             if name == "youtube":
-                results[name] = publish_youtube(video, title, caption, tags, publish_at=at)
+                results[name] = publish_youtube(
+                    video,
+                    title,
+                    caption,
+                    tags,
+                    publish_at=at,
+                    category=meta.category if meta else metadata.DEFAULT_CATEGORY,
+                )
             elif name == "tiktok":
                 results[name] = publish_tiktok(video, caption)
             else:

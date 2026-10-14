@@ -67,7 +67,7 @@ class Narration:
     elevenlabs_voice: str = "TX3LPaxmHKxFdv7VOQHJ"  # "Liam"
     openai_voice: str = "onyx"
     duck_db: float = -14.0  # how far the stream audio drops under the narrator
-    max_len_s: float = 6.0
+    max_len_s: float = 3.5  # a Short has ~2s to earn the viewer; longer hooks are sped up
 
 
 @dataclass
@@ -92,6 +92,7 @@ class Publishing:
     top10_title_template: str = "{hook} #shorts"
     top10_caption_template: str = "{hook}\n\n{hashtags}"
     default_hashtags: list[str] = field(default_factory=lambda: ["#shorts"])
+    cta: str = ""  # one line added to every description above the hashtags (subscribe nudge)
 
 
 @dataclass
@@ -102,6 +103,7 @@ class Trends:
     topics_per_run: int = 2
     min_duration_s: int = 120  # source videos for trend clips can be shorter than streams
     max_duration_s: int = 2 * 3600
+    max_source_age_h: float = 24  # never clip a source older than this when its age is known
 
 
 @dataclass
