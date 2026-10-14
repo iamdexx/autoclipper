@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 from autoclipper import narrate, qa, rank, render
@@ -432,11 +433,12 @@ def test_publish_budget_caps_and_spaces_real_posts(tmp_path, monkeypatch):
     cfg.publishing.dry_run = False
     cfg.publishing.youtube = True
     cfg.publishing.max_per_day, cfg.publishing.min_gap_min = 2, 60
+    cfg.publishing.schedule_ahead_h = 0  # this test: no scheduling, slots open or they don't
     posted = []
     monkeypatch.setattr(
         publish,
         "publish_youtube",
-        lambda v, t, d, tags: posted.append(t) or {"id": f"y{len(posted)}"},
+        lambda v, t, d, tags, publish_at=None: posted.append(t) or {"id": f"y{len(posted)}"},
     )
     st = State(tmp_path / "state.json")
 
@@ -446,7 +448,7 @@ def test_publish_budget_caps_and_spaces_real_posts(tmp_path, monkeypatch):
         return res["youtube"]
 
     assert go("a")["id"] == "y1"
-    assert "min gap" in go("b")["skipped"]  # too soon after the first
+    assert "next slot" in go("b")["skipped"]  # too soon after the first
     st.data["posts"][0]["at"] -= 61 * 60  # ...an hour later it's fine
     assert go("c")["id"] == "y2"
     for p in st.data["posts"]:
@@ -459,6 +461,85 @@ def test_publish_budget_caps_and_spaces_real_posts(tmp_path, monkeypatch):
     # force (manual `autoclipper publish`) ignores the budget
     res = publish.publish_all(tmp_path / "v.mp4", "f", "c", [], cfg, state=st, force=True)
     assert res["youtube"]["id"] == "y4"
+
+
+def test_publish_schedules_youtube_into_future_slots(tmp_path, monkeypatch):
+    """One run fills the coming slots: the first video goes out now, the next is uploaded as a
+    scheduled post one gap later, and the budget counts the scheduled one like a real post."""
+    from autoclipper import publish
+    from autoclipper.state import State
+
+    cfg = _cfg(tmp_path)
+    cfg.publishing.dry_run = False
+    cfg.publishing.youtube = True
+    cfg.publishing.max_per_day, cfg.publishing.min_gap_min = 3, 60
+    cfg.publishing.schedule_ahead_h = 1
+    calls = []
+
+    def fake_upload(v, t, d, tags, publish_at=None):
+        calls.append(publish_at)
+        out = {"id": t}
+        if publish_at and publish_at > time.time() + publish.SCHEDULE_MIN_AHEAD_S:
+            out.update(at=publish_at, scheduled=publish._rfc3339(publish_at))
+        return out
+
+    monkeypatch.setattr(publish, "publish_youtube", fake_upload)
+    st = State(tmp_path / "state.json")
+
+    def go(hook):
+        res = publish.publish_all(tmp_path / "v.mp4", hook, "c", [], cfg, state=st)
+        st.record_post("vid", "v.mp4", "youtube", res["youtube"])
+        return res["youtube"]
+
+    now = time.time()
+    assert go("a")["id"] == "a | c #shorts" and abs(calls[0] - now) < 5
+    b = go("b")
+    assert b["scheduled"] and 3590 < b["at"] - now < 3610  # one gap after the first
+    assert "schedule_ahead_h" in go("c")["skipped"]  # 2h out is past the horizon
+    cfg.publishing.schedule_ahead_h = 3
+    assert "2/3" not in go("c").get("skipped", "")
+    assert 7190 < st.data["posts"][-1]["at"] - now < 7210
+    assert "3/3 posts" in go("d")["skipped"]  # daily cap counts the scheduled ones
+    # tiktok has no scheduler: it waits for the slot instead
+    cfg.publishing.tiktok = True
+    monkeypatch.setattr(publish, "publish_tiktok", lambda v, c: {"id": "t1"})
+    st.record_post("vid", "v.mp4", "tiktok", {"id": "t0"})
+    res = publish.publish_all(tmp_path / "v.mp4", "e", "c", [], cfg, state=st)
+    assert "no scheduling on tiktok" in res["tiktok"]["skipped"]
+
+
+def test_publish_youtube_body_schedules_private_until_publish_at(tmp_path, monkeypatch):
+    from autoclipper import publish
+
+    bodies = []
+
+    class Req:
+        def next_chunk(self):
+            return None, {"id": "vid1"}
+
+    class Videos:
+        def insert(self, part, body, media_body):
+            bodies.append(body)
+            return Req()
+
+    class YT:
+        def videos(self):
+            return Videos()
+
+    monkeypatch.setattr(publish, "youtube_auth", lambda interactive=True, manual=False: None)
+    monkeypatch.setattr("googleapiclient.discovery.build", lambda *a, **k: YT())
+    monkeypatch.setattr("googleapiclient.http.MediaFileUpload", lambda *a, **k: object())
+    (tmp_path / "v.mp4").write_bytes(b"x")
+    later = time.time() + 3600
+    res = publish.publish_youtube(tmp_path / "v.mp4", "t", "d", ["#shorts"], publish_at=later)
+    assert bodies[0]["status"]["privacyStatus"] == "private"
+    assert bodies[0]["status"]["publishAt"] == publish._rfc3339(later)
+    assert res["at"] == later and res["scheduled"] == publish._rfc3339(later)
+    res = publish.publish_youtube(tmp_path / "v.mp4", "t", "d", ["#shorts"], publish_at=None)
+    assert (
+        bodies[1]["status"]["privacyStatus"] == "public" and "publishAt" not in bodies[1]["status"]
+    )
+    assert "at" not in res
 
 
 def test_config_goes_live_on_youtube_only():
@@ -753,9 +834,12 @@ def test_queue_posts_best_first_and_keeps_the_rest_for_later_runs(tmp_path, monk
     from autoclipper.state import State
 
     cfg = _queue_cfg(tmp_path)
+    cfg.publishing.schedule_ahead_h = 0
     posted = []
     monkeypatch.setattr(
-        publish, "publish_youtube", lambda v, t, d, tags: posted.append(t) or {"id": t}
+        publish,
+        "publish_youtube",
+        lambda v, t, d, tags, publish_at=None: posted.append(t) or {"id": t},
     )
     st = State(tmp_path / "state.json")
     for name, score in [("meh", 3.0), ("best", 9.0), ("good", 7.0)]:
@@ -783,6 +867,37 @@ def test_queue_posts_best_first_and_keeps_the_rest_for_later_runs(tmp_path, monk
         if p.get("id"):
             p["at"] -= 61 * 60
     assert queue.drain(cfg, st) == [] and "posts" in publish.over_budget("youtube", cfg, st)
+
+
+def test_queue_drain_fills_the_coming_slots_with_scheduled_posts(tmp_path, monkeypatch):
+    """With scheduling on, one run empties the queue into now + the next gaps (best first) and
+    stops at the daily cap; the leftovers wait for the next run."""
+    from autoclipper import publish, queue
+    from autoclipper.state import State
+
+    cfg = _queue_cfg(tmp_path)
+    cfg.publishing.max_per_day, cfg.publishing.schedule_ahead_h = 3, 12
+    uploads = []
+
+    def fake_upload(v, t, d, tags, publish_at=None):
+        uploads.append((t, publish_at))
+        out = {"id": t}
+        if publish_at > time.time() + publish.SCHEDULE_MIN_AHEAD_S:
+            out.update(at=publish_at, scheduled=publish._rfc3339(publish_at))
+        return out
+
+    monkeypatch.setattr(publish, "publish_youtube", fake_upload)
+    st = State(tmp_path / "state.json")
+    for name, score in [("meh", 3.0), ("best", 9.0), ("good", 7.0), ("ok", 5.0)]:
+        _enqueue(cfg, name, score)
+    now = time.time()
+    assert [it.meta.title for it in queue.drain(cfg, st)] == ["best", "good", "ok"]
+    assert [t for t, _ in uploads] == ["best", "good", "ok"]
+    gaps = [round((at - now) / 60) for _, at in uploads]
+    assert gaps == [0, 60, 120]
+    assert [it.meta.title for it in queue.items(cfg)] == ["meh"]
+    live = [p for p in st.data["posts"] if p.get("id")]
+    assert [bool(p.get("scheduled")) for p in live] == [False, True, True]
 
 
 def test_queue_prunes_stale_and_surplus_weakest_first(tmp_path):

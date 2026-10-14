@@ -43,6 +43,9 @@ class PublishError(RuntimeError):
     pass
 
 
+SCHEDULE_MIN_AHEAD_S = 120  # closer than this and it just goes out now
+
+
 # ---------------- YouTube ----------------
 
 
@@ -84,11 +87,23 @@ def youtube_auth(interactive: bool = True, manual: bool = False):
     return creds
 
 
-def publish_youtube(video: Path, title: str, description: str, tags: list[str]) -> dict:
+def publish_youtube(
+    video: Path, title: str, description: str, tags: list[str], publish_at: float | None = None
+) -> dict:
+    """`publish_at` (epoch) in the future: uploaded now as private with YouTube's own scheduler
+    flipping it public at that time - so one run can fill every posting slot until the next."""
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
 
     yt = build("youtube", "v3", credentials=youtube_auth(interactive=False))
+    status: dict = {
+        "privacyStatus": os.getenv("YT_PRIVACY", "public"),
+        "selfDeclaredMadeForKids": False,
+    }
+    scheduled = publish_at is not None and publish_at > time.time() + SCHEDULE_MIN_AHEAD_S
+    if scheduled and status["privacyStatus"] == "public":
+        status["privacyStatus"] = "private"
+        status["publishAt"] = _rfc3339(publish_at)
     body = {
         "snippet": {
             "title": title[:100],
@@ -96,10 +111,7 @@ def publish_youtube(video: Path, title: str, description: str, tags: list[str]) 
             "tags": [t.lstrip("#") for t in tags][:30],
             "categoryId": "24",
         },
-        "status": {
-            "privacyStatus": os.getenv("YT_PRIVACY", "public"),
-            "selfDeclaredMadeForKids": False,
-        },
+        "status": status,
     }
     media = MediaFileUpload(
         str(video), chunksize=8 * 1024 * 1024, resumable=True, mimetype="video/mp4"
@@ -108,7 +120,15 @@ def publish_youtube(video: Path, title: str, description: str, tags: list[str]) 
     resp = None
     while resp is None:
         _, resp = req.next_chunk()
-    return {"id": resp["id"], "url": f"https://youtube.com/shorts/{resp['id']}"}
+    out = {"id": resp["id"], "url": f"https://youtube.com/shorts/{resp['id']}"}
+    if "publishAt" in status:
+        # `at` is when it goes live - that is what the posting budget spaces out
+        out.update(at=publish_at, scheduled=status["publishAt"], uploaded_at=time.time())
+    return out
+
+
+def _rfc3339(t: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
 
 
 # ---------------- TikTok ----------------
@@ -390,16 +410,33 @@ def check_credentials(cfg: Config) -> dict[str, str]:
 # ---------------- dispatcher ----------------
 
 
-def over_budget(platform: str, cfg: Config, state: State) -> str:
-    """Why a real post to `platform` must wait ('' if it may go out now): publishing.max_per_day
-    real posts in the last 24h, publishing.min_gap_min minutes since the last one."""
+def next_slot(platform: str, cfg: Config, state: State) -> tuple[float, str]:
+    """When the next real post to `platform` can go live, honouring publishing.max_per_day and
+    min_gap_min against everything already posted or scheduled. Returns (epoch, '') - the epoch is
+    now when a slot is open, later when the video should be uploaded as a scheduled post - or
+    (0, why) when nothing may go out this run (daily cap, or the slot is further ahead than
+    publishing.schedule_ahead_h)."""
     p = cfg.publishing
-    times = state.posted_at(platform)
-    if len(times) >= p.max_per_day:
-        return f"{len(times)}/{p.max_per_day} posts in the last 24h"
-    if times and (gap := (time.time() - times[-1]) / 60) < p.min_gap_min:
-        return f"last post {gap:.0f} min ago (min gap {p.min_gap_min})"
-    return ""
+    now = time.time()
+    times = state.posted_at(platform)  # includes posts scheduled for later
+    slot = now
+    if times:
+        slot = max(now, times[-1] + p.min_gap_min * 60)
+    day = [t for t in times if slot - 24 * 3600 < t <= slot]
+    if len(day) >= p.max_per_day:
+        return 0.0, f"{len(day)}/{p.max_per_day} posts in the 24h to {_hm(slot)}"
+    if slot - now > p.schedule_ahead_h * 3600:
+        return 0.0, f"next slot {_hm(slot)} is over schedule_ahead_h ({p.schedule_ahead_h}h) away"
+    return slot, ""
+
+
+def over_budget(platform: str, cfg: Config, state: State) -> str:
+    """Why nothing can be posted or scheduled to `platform` this run ('' if something can)."""
+    return next_slot(platform, cfg, state)[1]
+
+
+def _hm(t: float) -> str:
+    return time.strftime("%H:%M UTC", time.gmtime(t))
 
 
 def publish_all(
@@ -440,18 +477,24 @@ def publish_all(
             log.info("[dry-run] would post %s to %s: %s", video.name, name, title)
             results[name] = {"dry_run": True, "title": title, "caption": caption}
             continue
-        if state is not None and not force and (why := over_budget(name, cfg, state)):
-            log.info("budget: not posting %s to %s (%s)", video.name, name, why)
-            results[name] = {"skipped": why, "title": title}
-            continue
+        at: float | None = None
+        if state is not None and not force:
+            at, why = next_slot(name, cfg, state)
+            if not why and name != "youtube" and at > time.time() + SCHEDULE_MIN_AHEAD_S:
+                why = f"next slot {_hm(at)} (no scheduling on {name})"
+            if why:
+                log.info("budget: not posting %s to %s (%s)", video.name, name, why)
+                results[name] = {"skipped": why, "title": title}
+                continue
         try:
             if name == "youtube":
-                results[name] = publish_youtube(video, title, caption, tags)
+                results[name] = publish_youtube(video, title, caption, tags, publish_at=at)
             elif name == "tiktok":
                 results[name] = publish_tiktok(video, caption)
             else:
                 results[name] = publish_instagram(video, caption, cfg.workdir / "public")
-            log.info("posted %s to %s: %s", video.name, name, results[name])
+            verb = "scheduled" if results[name].get("scheduled") else "posted"
+            log.info("%s %s to %s: %s", verb, video.name, name, results[name])
         except Exception as e:
             log.error("publish to %s failed: %s", name, e)
             results[name] = {"error": str(e)}

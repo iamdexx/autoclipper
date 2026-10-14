@@ -56,11 +56,15 @@ jobs:
             data/state.json
             data/queue
           key: autoclipper-state-${{ github.run_id }}
+      # debugging aid only: the videos are already posted/queued by now, so a full artifact
+      # store (the 500 MB free quota) must not turn the run red
       - uses: actions/upload-artifact@v4
         if: always()
+        continue-on-error: true
         with:
           name: clips
           path: |
             data/videos/*/clips/*.mp4
             data/top10/*/*.mp4
           if-no-files-found: ignore
+          retention-days: 2
