@@ -893,11 +893,34 @@ def test_metadata_category_from_llm_or_keywords(tmp_path, monkeypatch):
     )
     assert metadata.guess_category("xQc rages at a GTA RP cop on stream") == "gaming"
     assert metadata.guess_category("a quiet day") == "entertainment"
+    # only whole words count: Emma / matcha / coda are not mma / match / cod
+    assert (
+        metadata.guess_category("Emma tries matcha, then a coda in the warehouse")
+        == "entertainment"
+    )
+    assert metadata.guess_category("UFC mma knockout in the title match") == "sports"
     assert (
         metadata.fallback("Kai Cenat loses it", "Kai Cenat stream", "Kai", []).category == "gaming"
     )
     assert metadata.youtube_category_id("sports") == "17"
     assert metadata.youtube_category_id("whatever") == "24"
+
+
+def test_cta_lands_even_when_template_keeps_hashtags_inline(tmp_path, monkeypatch):
+    from autoclipper import publish
+
+    cfg = _queue_cfg(tmp_path)
+    cfg.publishing.dry_run = False
+    cfg.publishing.cta = "Subscribe for more."
+    cfg.publishing.caption_template = "{hashtags} {hook}"
+    seen = {}
+    monkeypatch.setattr(
+        publish, "publish_youtube", lambda v, t, d, tags, **kw: seen.update(d=d) or {"id": "y"}
+    )
+    publish.publish_all(
+        tmp_path / "x.mp4", "hook", "creator", ["#a"], cfg, state=State(tmp_path / "s.json")
+    )
+    assert seen["d"].endswith("\n\nSubscribe for more.") and seen["d"].startswith("#")
 
 
 def _queue_cfg(tmp_path):
@@ -1105,7 +1128,26 @@ def test_analytics_refresh_pulls_views_for_settled_posts_only(tmp_path, monkeypa
     assert asked == [["old"]]
     saved = json.loads((tmp_path / "state.json").read_text())["posts"]
     assert saved[0]["views"] == 77 and "views" not in saved[1] and saved[2]["views"] == 5
-    assert analytics.refresh(st) == 0  # checked just now
+    assert analytics.refresh(st) == 0  # first-day reading already taken; never overwritten
+    assert "fresh" not in asked[0]
+
+
+def test_analytics_format_only_counts_without_creator_history(tmp_path):
+    from autoclipper import analytics
+
+    st = _history(tmp_path, [("a", ["#a"], 200)] * 3)
+    st.record_post(
+        "v9", "c", "youtube", {"id": "t", "views": 10}, creator="", hashtags=[], kind="top10"
+    )
+    st.record_post(
+        "v8", "c", "youtube", {"id": "u", "views": 10}, creator="", hashtags=[], kind="top10"
+    )
+    st.record_post(
+        "v7", "c", "youtube", {"id": "w", "views": 10}, creator="", hashtags=[], kind="top10"
+    )
+    assert analytics.weight(st, "newcomer", ["#new"], "clip") == 1.0  # not inherited from kind:clip
+    assert analytics.weight(st, "", [], "top10") == 0.5  # format is all we know: it counts
+    assert analytics.weight(st, "a", ["#a"], "top10") == 1.5  # creator history beats format
 
 
 def test_queue_records_what_the_post_was_about(tmp_path, monkeypatch):

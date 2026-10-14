@@ -62,17 +62,17 @@ CATEGORIES = {
 DEFAULT_CATEGORY = "entertainment"
 
 _CATEGORY_WORDS = {
-    "sports": r"nfl|nba|mlb|nhl|ufc|mma|boxing|wwe|aew|wrestl|touchdown|dunk|goal|knockout|"
+    "sports": r"nfl|nba|mlb|nhl|ufc|mma\b|boxing|wwe|aew|wrestl|touchdown|dunk|goal|knockout|"
     r"playoff|quarterback|coach|highlights?|soccer|football|basketball|baseball|hockey|tennis|"
-    r"golf|f1|nascar|olympic|college|ncaa|premier league|champions league|home run|match",
-    "gaming": r"gta|twitch|stream(er|ing)?|fortnite|minecraft|valorant|warzone|call of duty|cod|"
+    r"golf|f1|nascar|olympic|college|ncaa|premier league|champions league|home run|match(es|up)?\b",
+    "gaming": r"gta|twitch|stream(er|ing)?|fortnite|minecraft|valorant|warzone|call of duty|cod\b|"
     r"speedrun|esports?|gamer|gaming|roblox|league of legends|nintendo|playstation|xbox|steam|"
     r"gameplay|rp\b",
     "music": r"concert|album|rapper|singer|tour|billboard|grammy|song|music",
     "news": r"election|senate|congress|president|governor|court|verdict|policy|parliament|"
-    r"minister|breaking news|war|tariff",
+    r"minister|breaking news|war\b|tariff",
     "tech": r"iphone|apple|google|openai|chatgpt|nvidia|tesla|spacex|android|microsoft|\bai\b|"
-    r"robot|chip|software|startup",
+    r"robot|chip\b|software|startup",
 }
 
 
@@ -81,7 +81,7 @@ def guess_category(*texts: str) -> str:
     blob = " ".join(t for t in texts if t).lower()
     best, hits = DEFAULT_CATEGORY, 0
     for name, pat in _CATEGORY_WORDS.items():
-        n = len(re.findall(pat, blob))
+        n = len(re.findall(rf"\b(?:{pat})", blob))  # word starts only: no 'Emma' -> mma
         if n > hits:
             best, hits = name, n
     return best
