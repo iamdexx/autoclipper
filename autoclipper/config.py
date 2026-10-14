@@ -92,6 +92,7 @@ class Publishing:
     top10_title_template: str = "{hook} #shorts"
     top10_caption_template: str = "{hook}\n\n{hashtags}"
     default_hashtags: list[str] = field(default_factory=lambda: ["#shorts"])
+    cta: str = ""  # one line added to every description above the hashtags (subscribe nudge)
 
 
 @dataclass

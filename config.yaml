@@ -45,6 +45,7 @@ publishing:
   schedule_ahead_h: 12       # a run uploads queued videos as scheduled YouTube posts this far ahead
   queue_max_age_h: 48        # the best-scoring queued video posts first; the rest age out
   queue_max_items: 24
+  cta: "Subscribe to Clipverse HQ for the best moments from streams, sports and the internet, every day."
 
 narration:
   provider: auto        # auto = edge (no key) > azure > google > elevenlabs > gemini > openai, next one when a call fails | off

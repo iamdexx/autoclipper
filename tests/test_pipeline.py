@@ -465,7 +465,7 @@ def test_publish_budget_caps_and_spaces_real_posts(tmp_path, monkeypatch):
     monkeypatch.setattr(
         publish,
         "publish_youtube",
-        lambda v, t, d, tags, publish_at=None: posted.append(t) or {"id": f"y{len(posted)}"},
+        lambda v, t, d, tags, publish_at=None, **kw: posted.append(t) or {"id": f"y{len(posted)}"},
     )
     st = State(tmp_path / "state.json")
 
@@ -503,7 +503,7 @@ def test_publish_schedules_youtube_into_future_slots(tmp_path, monkeypatch):
     cfg.publishing.schedule_ahead_h = 1
     calls = []
 
-    def fake_upload(v, t, d, tags, publish_at=None):
+    def fake_upload(v, t, d, tags, publish_at=None, **kw):
         calls.append(publish_at)
         out = {"id": t}
         if publish_at and publish_at > time.time() + publish.SCHEDULE_MIN_AHEAD_S:
@@ -558,14 +558,18 @@ def test_publish_youtube_body_schedules_private_until_publish_at(tmp_path, monke
     monkeypatch.setattr("googleapiclient.http.MediaFileUpload", lambda *a, **k: object())
     (tmp_path / "v.mp4").write_bytes(b"x")
     later = time.time() + 3600
-    res = publish.publish_youtube(tmp_path / "v.mp4", "t", "d", ["#shorts"], publish_at=later)
+    res = publish.publish_youtube(
+        tmp_path / "v.mp4", "t", "d", ["#shorts"], publish_at=later, category="sports"
+    )
     assert bodies[0]["status"]["privacyStatus"] == "private"
+    assert bodies[0]["snippet"]["categoryId"] == "17"
     assert bodies[0]["status"]["publishAt"] == publish._rfc3339(later)
     assert res["at"] == later and res["scheduled"] == publish._rfc3339(later)
     res = publish.publish_youtube(tmp_path / "v.mp4", "t", "d", ["#shorts"], publish_at=None)
     assert (
         bodies[1]["status"]["privacyStatus"] == "public" and "publishAt" not in bodies[1]["status"]
     )
+    assert bodies[1]["snippet"]["categoryId"] == "24"
     assert "at" not in res
 
 
@@ -834,7 +838,44 @@ def test_publish_all_uses_written_metadata_over_templates(tmp_path):
     pm = PostMeta("Real Title", "What happens.\nClip from X.", ["#a", "#shorts"])
     res = publish.publish_all(tmp_path / "v.mp4", "hook", "c", ["#zzz"], cfg, meta=pm)
     assert res["youtube"]["title"] == "Real Title"
+    assert res["youtube"]["caption"] == (
+        "What happens.\nClip from X.\n\n" + cfg.publishing.cta + "\n\n#a #shorts"
+    )
+    cfg.publishing.cta = ""
+    res = publish.publish_all(tmp_path / "v.mp4", "hook", "c", ["#zzz"], cfg, meta=pm)
     assert res["youtube"]["caption"] == "What happens.\nClip from X.\n\n#a #shorts"
+
+
+def test_metadata_category_from_llm_or_keywords(tmp_path, monkeypatch):
+    import json
+
+    from autoclipper import metadata
+
+    cfg = _cfg(tmp_path)
+    good = {
+        "title": "Bills vs Rams: Josh Allen Overtime Winner",
+        "description": "x",
+        "hashtags": [],
+    }
+    monkeypatch.setattr(
+        metadata.trends, "_llm", lambda p, c: json.dumps({**good, "category": "Sports"})
+    )
+    assert metadata.describe("h", "", "", "s", "c", [], cfg).category == "sports"
+    # unknown / missing category -> keywords in the title, transcript and tags decide
+    monkeypatch.setattr(
+        metadata.trends, "_llm", lambda p, c: json.dumps({**good, "category": "vlog"})
+    )
+    assert (
+        metadata.describe("h", "", "touchdown in overtime", "s", "c", ["#nfl"], cfg).category
+        == "sports"
+    )
+    assert metadata.guess_category("xQc rages at a GTA RP cop on stream") == "gaming"
+    assert metadata.guess_category("a quiet day") == "entertainment"
+    assert (
+        metadata.fallback("Kai Cenat loses it", "Kai Cenat stream", "Kai", []).category == "gaming"
+    )
+    assert metadata.youtube_category_id("sports") == "17"
+    assert metadata.youtube_category_id("whatever") == "24"
 
 
 def _queue_cfg(tmp_path):
@@ -866,7 +907,7 @@ def test_queue_posts_best_first_and_keeps_the_rest_for_later_runs(tmp_path, monk
     monkeypatch.setattr(
         publish,
         "publish_youtube",
-        lambda v, t, d, tags, publish_at=None: posted.append(t) or {"id": t},
+        lambda v, t, d, tags, publish_at=None, **kw: posted.append(t) or {"id": t},
     )
     st = State(tmp_path / "state.json")
     for name, score in [("meh", 3.0), ("best", 9.0), ("good", 7.0)]:
@@ -906,7 +947,7 @@ def test_queue_drain_fills_the_coming_slots_with_scheduled_posts(tmp_path, monke
     cfg.publishing.max_per_day, cfg.publishing.schedule_ahead_h = 3, 12
     uploads = []
 
-    def fake_upload(v, t, d, tags, publish_at=None):
+    def fake_upload(v, t, d, tags, publish_at=None, **kw):
         uploads.append((t, publish_at))
         out = {"id": t}
         if publish_at > time.time() + publish.SCHEDULE_MIN_AHEAD_S:
