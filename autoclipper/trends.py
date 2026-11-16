@@ -170,15 +170,19 @@ def next_pillars(cfg: Config, used: list[str], n: int) -> list[Pillar]:
     """The `n` pillars whose turn it is: never-used first (config order), then least recently used,
     skipping any that already fills its max_share of the last `pillar_window` topics."""
     t = cfg.trends
-    recent = list(used[-t.pillar_window :]) if t.pillar_window > 0 else []
+    w = t.pillar_window
+    recent = list(used[-w:]) if w > 0 else []
     out: list[Pillar] = []
+
+    def fits(p: Pillar) -> bool:
+        if p.max_share >= 1 or w <= 0:
+            return True
+        after = [*recent, p.name][-w:]
+        return after.count(p.name) <= p.max_share * len(after)
+
     for _ in range(min(n, len(t.pillars))):
         last = {name: i for i, name in enumerate(recent)}
-        open_ = [
-            p
-            for p in t.pillars
-            if p not in out and recent.count(p.name) < p.max_share * (len(recent) + 1)
-        ]
+        open_ = [p for p in t.pillars if p not in out and fits(p)]
         if not open_:
             break
         pick = min(open_, key=lambda p: last.get(p.name, -1))
@@ -321,8 +325,8 @@ def pick_topics(
             for tp in sorted(topics, key=lambda x: -x.traffic)
             if tp.name.lower() not in used_l
         ]
-        if not slots:
-            items = items[: t.topics_per_run]
+        # with a topic mix, _one_per_pillar fills each slot from that pillar's own results
+        items = [] if slots else items[: t.topics_per_run]
     by_name = {tp.name.lower(): tp for tp in topics}
     picked = []
     for it in items:
@@ -342,13 +346,14 @@ def _one_per_pillar(
     picked: list[Topic], topics: list[Topic], slots: list[Pillar], used: set[str]
 ) -> list[Topic]:
     """One topic per pillar whose turn it is: the picker's choice when it is a real, unused item
-    of that pillar, else that pillar's most-viewed unused item. An untagged item fills the first
-    slot still empty."""
+    of that pillar, else that pillar's most-viewed unused item, else the most-viewed untagged
+    one (a Google trend)."""
     by_traffic = sorted(topics, key=lambda x: -x.traffic)
     out: list[Topic] = []
     taken: set[str] = set()
     for p in slots:
-        for tp in [*picked, *by_traffic]:
+        own = [tp for tp in by_traffic if tp.pillar == p.name]
+        for tp in [*picked, *own, *by_traffic]:
             k = tp.name.lower()
             if tp.source == "llm" or k in used or k in taken or tp.pillar not in (p.name, ""):
                 continue

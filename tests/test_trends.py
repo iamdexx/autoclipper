@@ -184,14 +184,19 @@ def test_next_pillars_rotates_and_respects_max_share(tmp_path):
     cfg = _mix(_cfg(tmp_path))
     names = lambda used, n: [p.name for p in trends.next_pillars(cfg, used, n)]  # noqa: E731
     assert names([], 2) == ["news", "map"]
-    assert names(["news", "map"], 2) == ["money", "news"]
-    # money was just used: capped at 15% of recent topics, so it waits while the others rotate
+    # money is capped at 15% of recent topics, so it waits while the others rotate
+    assert names(["news", "map"], 2) == ["news", "map"]
+    assert names(["news", "map"] * 3, 2) == ["money", "news"]
     assert names(["news", "map", "money"], 3) == ["news", "map"]
+    # a full window already at the cap stays shut even when the topic falling out is another's
+    full = ["news", "map"] * 5 + ["money", "news", "map"] * 3 + ["news"]
+    assert "money" not in names(full, 3)
     used: list[str] = []
     for _ in range(40):
         used += names(used, 1)
     assert 3 <= used.count("money") <= 7 and used.count("news") > used.count("money")
     assert "money" not in {a for a, b in zip(used, used[1:], strict=False) if a == b}
+    assert all(used[i : i + 20].count("money") <= 3 for i in range(len(used) - 19))
 
 
 def test_discover_tags_pillars_and_drops_off_focus(tmp_path, monkeypatch):
@@ -214,11 +219,13 @@ def test_pick_topics_takes_one_per_pillar_in_turn(tmp_path, monkeypatch):
         Topic("GTA 6 map a", "y", 7, pillar="map"),
         Topic("GTA 6 clipping", "y", 900, pillar="money"),
     ]
-    picked = trends.pick_topics(topics, cfg, used=[], pillars_used=[])  # no LLM: most viewed
+    trend = Topic("GTA 6 trend", "google", 9000)  # untagged: only fills a pillar with nothing
+    picked = trends.pick_topics([trend, *topics], cfg, used=[], pillars_used=[])  # no LLM
     assert [(t.name, t.pillar) for t in picked] == [
         ("GTA 6 news b", "news"),
         ("GTA 6 map a", "map"),
     ]
+    assert trend.pillar == ""
     # the LLM's pick wins inside its pillar; an invented topic or a pillar not up is ignored
     fake = json.dumps(
         [
@@ -235,7 +242,7 @@ def test_pick_topics_takes_one_per_pillar_in_turn(tmp_path, monkeypatch):
         ("GTA 6 map a", "GTA 6 map a"),
     ]
     assert "GTA 6 clipping" not in seen["p"] and "- news" in seen["p"]
-    picked = trends.pick_topics(topics, cfg, used=[], pillars_used=["news", "map"])
+    picked = trends.pick_topics(topics, cfg, used=[], pillars_used=["news", "map"] * 3)
     assert picked[0].pillar == "money"
 
 
