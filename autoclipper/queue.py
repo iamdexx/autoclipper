@@ -11,7 +11,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import publish
+from . import publish, trends
 from .config import Config
 from .metadata import PostMeta
 from .state import State
@@ -106,12 +106,17 @@ def remove(cfg: Config, it: Item) -> None:
 
 
 def prune(cfg: Config) -> list[Item]:
-    """Drop stale (publishing.queue_max_age_h) and surplus (publishing.queue_max_items, weakest
-    first) entries; returns what's left, best first."""
+    """Drop off-focus (trends.focus_keywords, e.g. queued before the channel changed focus), stale
+    (publishing.queue_max_age_h) and surplus (publishing.queue_max_items, weakest first) entries;
+    returns what's left, best first."""
     p = cfg.publishing
     keep: list[Item] = []
     for it in items(cfg):
-        if it.age_h > p.queue_max_age_h:
+        text = " ".join([it.meta.title, it.meta.description, it.hook, *it.meta.hashtags])
+        if not trends.on_focus(text, cfg):
+            log.info("queue: dropping %s (not about %s)", it.video, cfg.trends.focus)
+            remove(cfg, it)
+        elif it.age_h > p.queue_max_age_h:
             log.info("queue: dropping %s (%.0fh old)", it.video, it.age_h)
             remove(cfg, it)
         elif len(keep) >= p.queue_max_items:

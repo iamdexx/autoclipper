@@ -117,6 +117,9 @@ class Trends:
     # Channel focus. With keywords set, every topic, trend source and creator upload must name one
     # of them in its title (whole words, case-insensitive) or it is skipped.
     focus: str = ""  # e.g. "GTA 6", told to the topic picker
+    # Channels never clipped from (name, case-insensitive), e.g. one whose owner's Content ID
+    # claims got an upload blocked.
+    blocked_channels: list[str] = field(default_factory=list)
     focus_keywords: list[str] = field(default_factory=list)  # e.g. ["gta 6", "gta vi"]
     # Topic mix: each run takes its topics from the pillars used least recently, one per pillar,
     # so the channel covers the whole range instead of whatever has the most views today.

@@ -382,6 +382,7 @@ def find_sources(topic: Topic, cfg: Config) -> list[Candidate]:
     q = topic.query or topic.name
     pool: list[Candidate] = []
     seen: set[str] = set()
+    blocked = {b.strip().lower() for b in t.blocked_channels}
     for within in _FRESH_ROUNDS:
         try:
             found = yt_search(q, 12, within=within)
@@ -391,7 +392,7 @@ def find_sources(topic: Topic, cfg: Config) -> list[Candidate]:
         for c in found:
             if c.id in seen or not (t.min_duration_s <= c.duration <= t.max_duration_s):
                 continue
-            if not on_focus(c.title, cfg):
+            if not on_focus(c.title, cfg) or c.channel.strip().lower() in blocked:
                 continue
             if t.max_source_age_h and c.age_h is not None and c.age_h > t.max_source_age_h:
                 continue

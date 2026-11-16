@@ -258,6 +258,8 @@ def test_find_sources_drops_off_focus_videos(tmp_path, monkeypatch):
     ]
     monkeypatch.setattr(trends, "yt_search", lambda q, n=10, **kw: cands)
     assert [c.id for c in trends.find_sources(Topic("x", "g"), cfg)] == ["b"]
+    cfg.trends.blocked_channels = [" C "]
+    assert trends.find_sources(Topic("x", "g"), cfg) == []
 
 
 def test_state_pillars(tmp_path):

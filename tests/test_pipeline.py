@@ -930,6 +930,7 @@ def _queue_cfg(tmp_path):
     cfg.publishing.dry_run = False
     cfg.publishing.youtube = True
     cfg.publishing.max_per_day, cfg.publishing.min_gap_min = 2, 60
+    cfg.trends.focus_keywords = []  # generic channel; the focus test sets its own
     return cfg
 
 
@@ -942,6 +943,19 @@ def _enqueue(cfg, name, score, **kw):
     return queue.enqueue(
         v, "clip", f"src-{name}", score, PostMeta(name, "d", ["#shorts"]), cfg, **kw
     )
+
+
+def test_queue_drops_videos_queued_before_a_focus_change(tmp_path):
+    from autoclipper import queue
+
+    cfg = _queue_cfg(tmp_path)
+    _enqueue(cfg, "Haaland scores", 9)
+    _enqueue(cfg, "GTA 6 map leak", 5)
+    _enqueue(cfg, "Vice City at night", 4, hook="Only in GTA")
+    cfg.trends.focus, cfg.trends.focus_keywords = "GTA 6", ["gta 6", "gta"]
+    kept = ["GTA 6 map leak", "Vice City at night"]
+    assert [it.meta.title for it in queue.prune(cfg)] == kept
+    assert [it.meta.title for it in queue.items(cfg)] == kept
 
 
 def test_queue_posts_best_first_and_keeps_the_rest_for_later_runs(tmp_path, monkeypatch):
