@@ -25,6 +25,7 @@ def _cfg(tmp_path):
     cfg.narration.provider = "off"
     cfg.look.watermark = ""  # caption tests count Dialogue lines
     cfg.trends.topics_per_run = 1
+    cfg.trends.focus_keywords, cfg.trends.pillars = [], []  # generic channel; _mix() sets a focus
     return cfg
 
 
@@ -149,6 +150,122 @@ def test_pick_topics_uses_llm_choice(tmp_path, monkeypatch):
     picked = trends.pick_topics([Topic("hot", "g", 1)], cfg, used=[])
     assert picked[0].source == "g" and picked[0].query == "hot highlights"
     assert picked[0].hashtags == ["#a", "#b"]
+
+
+def _mix(cfg):
+    from autoclipper.config import Pillar
+
+    cfg.trends.focus_keywords = ["gta 6", "gta"]
+    cfg.trends.pillars = [
+        Pillar("news", ["gta 6 news"]),
+        Pillar("map", ["gta 6 map"]),
+        Pillar("money", ["clipping gta 6"], max_share=0.15),
+    ]
+    return cfg
+
+
+def test_on_focus_matches_whole_keywords_only(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.trends.focus_keywords = []
+    assert trends.on_focus("NFL week 3", cfg)  # no focus configured: everything passes
+    _mix(cfg)
+    assert trends.on_focus("GTA6 map leaked?", cfg) and trends.on_focus("New GTA VI trailer", cfg)
+    assert not trends.on_focus("Regatta highlights", cfg) and not trends.on_focus("", cfg)
+
+
+def test_config_pillars_cover_a_range_and_cap_the_clipping_one():
+    t = Config.load(ROOT / "config.yaml").trends
+    assert len(t.pillars) >= 6 and all(p.queries for p in t.pillars)
+    capped = [p for p in t.pillars if p.max_share < 1]
+    assert [p.name for p in capped] == ["clipping gta 6"]
+
+
+def test_next_pillars_rotates_and_respects_max_share(tmp_path):
+    cfg = _mix(_cfg(tmp_path))
+    names = lambda used, n: [p.name for p in trends.next_pillars(cfg, used, n)]  # noqa: E731
+    assert names([], 2) == ["news", "map"]
+    assert names(["news", "map"], 2) == ["money", "news"]
+    # money is capped at 15% of a 20-topic window: after 3 it waits while the others rotate
+    assert names(["news", "map", "money"] * 3, 3) == ["news", "map"]
+    # a full window already at the cap stays shut even when the topic falling out is another's
+    full = ["news", "map"] * 5 + ["money", "news", "map"] * 3 + ["news"]
+    assert "money" not in names(full, 3)
+    # a mix where every pillar is capped still starts and keeps rotating
+    for p in cfg.trends.pillars:
+        p.max_share = 0.4
+    assert names([], 3) == ["news", "map", "money"]
+    cfg = _mix(_cfg(tmp_path))
+    used: list[str] = []
+    for _ in range(40):
+        used += names(used, 1)
+    assert 3 <= used.count("money") <= 7 and used.count("news") > used.count("money")
+    assert "money" not in {a for a, b in zip(used, used[1:], strict=False) if a == b}
+    assert all(used[i : i + 20].count("money") <= 3 for i in range(len(used) - 19))
+
+
+def test_discover_tags_pillars_and_drops_off_focus(tmp_path, monkeypatch):
+    cfg = _mix(_cfg(tmp_path))
+    monkeypatch.setattr(trends, "google_trends", lambda geo: [Topic("phillies", "google")])
+    hits = {
+        "gta 6 news": [Topic("GTA 6 delayed?", "youtube", 9), Topic("Fortnite live", "youtube", 99)]
+    }
+    monkeypatch.setattr(trends, "pillar_hot", lambda q, n=8: hits.get(q, []))
+    got = trends.discover(cfg)
+    assert [(t.name, t.pillar) for t in got] == [("GTA 6 delayed?", "news")]
+
+
+def test_pick_topics_takes_one_per_pillar_in_turn(tmp_path, monkeypatch):
+    cfg = _mix(_cfg(tmp_path))
+    cfg.trends.topics_per_run = 2
+    topics = [
+        Topic("GTA 6 news a", "y", 5, pillar="news"),
+        Topic("GTA 6 news b", "y", 50, pillar="news"),
+        Topic("GTA 6 map a", "y", 7, pillar="map"),
+        Topic("GTA 6 clipping", "y", 900, pillar="money"),
+    ]
+    trend = Topic("GTA 6 trend", "google", 9000)  # untagged: only fills a pillar with nothing
+    picked = trends.pick_topics([trend, *topics], cfg, used=[], pillars_used=[])  # no LLM
+    assert [(t.name, t.pillar) for t in picked] == [
+        ("GTA 6 news b", "news"),
+        ("GTA 6 map a", "map"),
+    ]
+    assert trend.pillar == ""
+    # the LLM's pick wins inside its pillar; an invented topic or a pillar not up is ignored
+    fake = json.dumps(
+        [
+            {"topic": "GTA 6 news a", "query": "q1", "angle": "a"},
+            {"topic": "made up", "query": "q2"},
+            {"topic": "GTA 6 clipping", "query": "q3"},
+        ]
+    )
+    seen = {}
+    monkeypatch.setattr(trends, "_llm", lambda prompt, c: seen.setdefault("p", prompt) and fake)
+    picked = trends.pick_topics(topics, cfg, used=[], pillars_used=[])
+    assert [(t.name, t.query) for t in picked] == [
+        ("GTA 6 news a", "q1"),
+        ("GTA 6 map a", "GTA 6 map a"),
+    ]
+    assert "GTA 6 clipping" not in seen["p"] and "- news" in seen["p"]
+    picked = trends.pick_topics(topics, cfg, used=[], pillars_used=["news", "map"])
+    assert picked[0].pillar == "money"
+
+
+def test_find_sources_drops_off_focus_videos(tmp_path, monkeypatch):
+    cfg = _mix(_cfg(tmp_path))
+    cands = [
+        Candidate("a", "Fortnite stream", "c", 600, 9),
+        Candidate("b", "GTA 6 map", "c", 600, 1),
+    ]
+    monkeypatch.setattr(trends, "yt_search", lambda q, n=10, **kw: cands)
+    assert [c.id for c in trends.find_sources(Topic("x", "g"), cfg)] == ["b"]
+
+
+def test_state_pillars(tmp_path):
+    st = State(tmp_path / "state.json")
+    st.mark_pillar("news")
+    st.mark_pillar("")
+    st.mark_pillar("map")
+    assert State(tmp_path / "state.json").used_pillars() == ["news", "map"]
 
 
 def test_pick_source_filters_duration_and_falls_back(tmp_path, monkeypatch):

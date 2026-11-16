@@ -4,6 +4,10 @@ Sources (all keyless, best-effort - a failing source is skipped):
   google  : Google Trends daily RSS (per geo) - topic, approx traffic, headline
   youtube : yt-dlp search of each configured niche, most viewed uploads of the last 24h
 
+With `trends.pillars` set the channel has a fixed topic mix instead: every pillar's own searches
+are run, anything off `trends.focus_keywords` is dropped, and each run's topics come from the
+pillars used least recently (`next_pillars`), one topic per pillar.
+
 An LLM (same provider order as ranking) then filters the raw list down to topics that fit the
 configured niches and are worth a video, and picks the best source video per topic.
 """
@@ -12,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 import time
 import urllib.parse
@@ -22,7 +27,7 @@ from dataclasses import asdict, dataclass, field
 import requests
 
 from . import ingest, rank
-from .config import Config
+from .config import Config, Pillar
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +45,7 @@ class Topic:
     query: str = ""  # YouTube search query chosen by the LLM
     angle: str = ""  # why it's hot / what the clip should focus on
     hashtags: list[str] = field(default_factory=list)
+    pillar: str = ""  # topic-mix pillar it was found under ("" = fits any)
 
 
 @dataclass
@@ -141,18 +147,70 @@ def youtube_hot(niche: str, n: int = 8) -> list[Topic]:
     ]
 
 
+def on_focus(text: str, cfg: Config) -> bool:
+    """True when `text` names one of trends.focus_keywords as whole words (always, with none set)."""
+    kws = [k.strip() for k in cfg.trends.focus_keywords if k.strip()]
+    if not kws:
+        return True
+    pat = "|".join(r"\s*".join(re.escape(w) for w in k.split()) for k in kws)
+    return re.search(rf"\b(?:{pat})\b", text or "", re.I) is not None
+
+
+def pillar_hot(query: str, n: int = 8) -> list[Topic]:
+    """Today's most-viewed uploads for a pillar search; a narrow pillar with nothing new today
+    falls back to YouTube's relevance ranking so it still gets its turn."""
+    return youtube_hot(query, n) or [
+        Topic(name=c.title, source="youtube", traffic=c.views, headline=c.channel)
+        for c in yt_search(query, n)
+        if c.views
+    ]
+
+
+def next_pillars(cfg: Config, used: list[str], n: int) -> list[Pillar]:
+    """The `n` pillars whose turn it is: never-used first (config order), then least recently used,
+    skipping any that already fills its max_share of a `pillar_window` of topics (at least one
+    topic per window, so a capped pillar still gets a turn)."""
+    t = cfg.trends
+    w = t.pillar_window
+    recent = list(used[-w:]) if w > 0 else []
+    out: list[Pillar] = []
+
+    def fits(p: Pillar) -> bool:
+        if p.max_share >= 1 or w <= 0:
+            return True
+        return [*recent, p.name][-w:].count(p.name) <= max(1, int(p.max_share * w))
+
+    for _ in range(min(n, len(t.pillars))):
+        last = {name: i for i, name in enumerate(recent)}
+        open_ = [p for p in t.pillars if p not in out and fits(p)]
+        if not open_:
+            break
+        pick = min(open_, key=lambda p: last.get(p.name, -1))
+        out.append(pick)
+        recent.append(pick.name)
+    return out
+
+
 def discover(cfg: Config) -> list[Topic]:
     t = cfg.trends
-    jobs = [(google_trends, g, f"google trends {g}") for g in t.geos]
-    jobs += [(youtube_hot, n, f"youtube search {n!r}") for n in t.niches]
+    jobs = [(google_trends, g, f"google trends {g}", "") for g in t.geos]
+    if t.pillars:
+        jobs += [
+            (pillar_hot, q, f"youtube search {q!r}", p.name) for p in t.pillars for q in p.queries
+        ]
+    else:
+        jobs += [(youtube_hot, n, f"youtube search {n!r}", "") for n in t.niches]
 
     def _run(job):
-        fn, arg, label = job
+        fn, arg, label, pillar = job
         try:
-            return fn(arg)
+            found = fn(arg)
         except Exception as e:
             log.warning("%s failed: %s", label, e)
             return []
+        for tp in found:
+            tp.pillar = pillar
+        return [tp for tp in found if on_focus(f"{tp.name} {tp.headline}", cfg)]
 
     topics: list[Topic] = []
     with ThreadPoolExecutor(max_workers=6) as ex:
@@ -172,7 +230,7 @@ PICK_TOPICS = """You run a short-form video channel (TikTok / Reels / Shorts) ab
 Below are things trending right now. Pick the {n} that (a) fit the channel, (b) people will
 search / watch video about today, and (c) have real footage on YouTube to clip from.
 Skip anything already covered: {used}.
-{history}
+{history}{mix}
 Return ONLY a JSON array, each item:
 {{"topic": "<trend name exactly as given>", "query": "<best YouTube search to find the key footage>",
   "angle": "<one sentence: why it's blowing up / what the clip should show>",
@@ -205,24 +263,56 @@ def _llm(prompt: str, cfg: Config) -> str:
     return call(prompt, cfg.llm_model)
 
 
+PILLAR_MIX = """
+The channel is about {focus} and rotates through a fixed topic mix. This time pick exactly ONE
+topic for EACH of these pillars, from the items tagged with that pillar (or tagged "any"):
+{pillars}
+Never present rumours or leaks as confirmed, and never promise an income or a result."""
+
+
 def pick_topics(
-    topics: list[Topic], cfg: Config, used: list[str], history: str = ""
+    topics: list[Topic],
+    cfg: Config,
+    used: list[str],
+    history: str = "",
+    pillars_used: list[str] | None = None,
 ) -> list[Topic]:
     """`history`: analytics.summary() - what this channel's past Shorts did, so the picker leans
-    into what its viewers actually watch."""
+    into what its viewers actually watch. `pillars_used`: State.used_pillars(), which decides
+    whose turn it is when trends.pillars is set."""
     t = cfg.trends
     if not topics:
         return []
+    used_l = {u.lower() for u in used}
+    slots = next_pillars(cfg, pillars_used or [], t.topics_per_run) if t.pillars else []
+    if t.pillars:
+        names = {p.name for p in slots}
+        topics = [tp for tp in topics if tp.pillar in names or not tp.pillar]
+        if not slots or not topics:
+            return []
     listing = "\n".join(
-        f"- {tp.name} [{tp.source}, traffic {tp.traffic}] {tp.headline}".strip() for tp in topics
+        f"- {tp.name} [{tp.pillar or 'any'}, {tp.source}, traffic {tp.traffic}] "
+        f"{tp.headline}".strip()
+        if slots
+        else f"- {tp.name} [{tp.source}, traffic {tp.traffic}] {tp.headline}".strip()
+        for tp in topics
+    )
+    mix = (
+        PILLAR_MIX.format(
+            focus=t.focus or "the niches above",
+            pillars="\n".join(f"- {p.name}: {p.angle}".rstrip(": ") for p in slots),
+        )
+        if slots
+        else ""
     )
     try:
         raw = _llm(
             PICK_TOPICS.format(
-                niches=", ".join(t.niches) or "anything viral",
-                n=t.topics_per_run,
+                niches=t.focus or ", ".join(t.niches) or "anything viral",
+                n=len(slots) or t.topics_per_run,
                 used=", ".join(used[-50:]) or "nothing",
                 history=f"How this channel's past videos did: {history}" if history else "",
+                mix=mix,
                 trending=listing,
             ),
             cfg,
@@ -233,8 +323,10 @@ def pick_topics(
         items = [
             {"topic": tp.name, "query": tp.name, "angle": tp.headline, "hashtags": []}
             for tp in sorted(topics, key=lambda x: -x.traffic)
-            if tp.name.lower() not in {u.lower() for u in used}
-        ][: t.topics_per_run]
+            if tp.name.lower() not in used_l
+        ]
+        # with a topic mix, _one_per_pillar fills each slot from that pillar's own results
+        items = [] if slots else items[: t.topics_per_run]
     by_name = {tp.name.lower(): tp for tp in topics}
     picked = []
     for it in items:
@@ -245,7 +337,35 @@ def pick_topics(
         base.hashtags = [str(h) for h in it.get("hashtags", [])][:5]
         if base.name:
             picked.append(base)
+    if slots:
+        return _one_per_pillar(picked, topics, slots, used_l)
     return picked[: t.topics_per_run]
+
+
+def _one_per_pillar(
+    picked: list[Topic], topics: list[Topic], slots: list[Pillar], used: set[str]
+) -> list[Topic]:
+    """One topic per pillar whose turn it is: the picker's choice when it is a real, unused item
+    of that pillar, else that pillar's most-viewed unused item, else the most-viewed untagged
+    one (a Google trend)."""
+    by_traffic = sorted(topics, key=lambda x: -x.traffic)
+    out: list[Topic] = []
+    taken: set[str] = set()
+    for p in slots:
+        own = [tp for tp in by_traffic if tp.pillar == p.name]
+        for tp in [*picked, *own, *by_traffic]:
+            k = tp.name.lower()
+            if tp.source == "llm" or k in used or k in taken or tp.pillar not in (p.name, ""):
+                continue
+            tp.pillar = p.name
+            tp.query = tp.query or tp.name
+            tp.angle = tp.angle or p.angle or tp.headline
+            taken.add(k)
+            out.append(tp)
+            break
+        else:
+            log.info("pillar %r: nothing usable this run", p.name)
+    return out
 
 
 # search windows tried in order; the first one with enough usable videos is the pool
@@ -270,6 +390,8 @@ def find_sources(topic: Topic, cfg: Config) -> list[Candidate]:
             found = []
         for c in found:
             if c.id in seen or not (t.min_duration_s <= c.duration <= t.max_duration_s):
+                continue
+            if not on_focus(c.title, cfg):
                 continue
             if t.max_source_age_h and c.age_h is not None and c.age_h > t.max_source_age_h:
                 continue

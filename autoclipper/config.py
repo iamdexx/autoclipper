@@ -96,6 +96,16 @@ class Publishing:
 
 
 @dataclass
+class Pillar:
+    """One slice of the channel's topic mix (see Trends.pillars)."""
+
+    name: str
+    queries: list[str] = field(default_factory=list)  # YouTube searches that surface its topics
+    angle: str = ""  # what a video in this pillar should be about, for the topic picker
+    max_share: float = 1.0  # at most this share of recent videos comes from this pillar
+
+
+@dataclass
 class Trends:
     enabled: bool = False
     niches: list[str] = field(default_factory=list)  # e.g. ["sports", "gaming", "celebrity drama"]
@@ -104,6 +114,14 @@ class Trends:
     min_duration_s: int = 120  # source videos for trend clips can be shorter than streams
     max_duration_s: int = 2 * 3600
     max_source_age_h: float = 24  # never clip a source older than this when its age is known
+    # Channel focus. With keywords set, every topic, trend source and creator upload must name one
+    # of them in its title (whole words, case-insensitive) or it is skipped.
+    focus: str = ""  # e.g. "GTA 6", told to the topic picker
+    focus_keywords: list[str] = field(default_factory=list)  # e.g. ["gta 6", "gta vi"]
+    # Topic mix: each run takes its topics from the pillars used least recently, one per pillar,
+    # so the channel covers the whole range instead of whatever has the most views today.
+    pillars: list[Pillar] = field(default_factory=list)
+    pillar_window: int = 20  # how many recent topics max_share is measured over
 
 
 @dataclass
@@ -209,6 +227,7 @@ class Config:
         publishing = Publishing(**raw.pop("publishing", {}))
         narration = Narration(**raw.pop("narration", {}))
         trends = Trends(**raw.pop("trends", {}))
+        trends.pillars = [p if isinstance(p, Pillar) else Pillar(**p) for p in trends.pillars]
         top10 = TopTen(**raw.pop("top10", {}))
         verify = Verify(**raw.pop("verify", {}))
         qa = QA(**raw.pop("qa", {}))

@@ -76,6 +76,15 @@ Everything is keyless; a failing source is skipped. Covered topics are remembere
 `state.json` so the same trend isn't clipped twice. `autoclipper trends` prints what's hot and what
 would be picked; add `--clip` to actually make the clips.
 
+### Channel focus and topic mix
+
+`trends.focus_keywords` keeps the channel on one subject: a trend topic, a source video or a
+creator upload whose title names none of them (whole words) is skipped. `trends.pillars` is the
+topic mix. Each pillar has its own YouTube searches and an angle; every run takes one topic from
+each of the `topics_per_run` pillars used least recently (trend clips and Top-N videos share the
+rotation, kept in `state.json`), and `max_share` caps a pillar's share of the last
+`pillar_window` topics. With no pillars set, `niches` works as before.
+
 ## Top 10 videos
 
 `autoclipper top10 "craziest NFL plays this week"` (or no topic: picked from trends /
