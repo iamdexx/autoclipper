@@ -184,13 +184,17 @@ def test_next_pillars_rotates_and_respects_max_share(tmp_path):
     cfg = _mix(_cfg(tmp_path))
     names = lambda used, n: [p.name for p in trends.next_pillars(cfg, used, n)]  # noqa: E731
     assert names([], 2) == ["news", "map"]
-    # money is capped at 15% of recent topics, so it waits while the others rotate
-    assert names(["news", "map"], 2) == ["news", "map"]
-    assert names(["news", "map"] * 3, 2) == ["money", "news"]
-    assert names(["news", "map", "money"], 3) == ["news", "map"]
+    assert names(["news", "map"], 2) == ["money", "news"]
+    # money is capped at 15% of a 20-topic window: after 3 it waits while the others rotate
+    assert names(["news", "map", "money"] * 3, 3) == ["news", "map"]
     # a full window already at the cap stays shut even when the topic falling out is another's
     full = ["news", "map"] * 5 + ["money", "news", "map"] * 3 + ["news"]
     assert "money" not in names(full, 3)
+    # a mix where every pillar is capped still starts and keeps rotating
+    for p in cfg.trends.pillars:
+        p.max_share = 0.4
+    assert names([], 3) == ["news", "map", "money"]
+    cfg = _mix(_cfg(tmp_path))
     used: list[str] = []
     for _ in range(40):
         used += names(used, 1)
@@ -242,7 +246,7 @@ def test_pick_topics_takes_one_per_pillar_in_turn(tmp_path, monkeypatch):
         ("GTA 6 map a", "GTA 6 map a"),
     ]
     assert "GTA 6 clipping" not in seen["p"] and "- news" in seen["p"]
-    picked = trends.pick_topics(topics, cfg, used=[], pillars_used=["news", "map"] * 3)
+    picked = trends.pick_topics(topics, cfg, used=[], pillars_used=["news", "map"])
     assert picked[0].pillar == "money"
 
 

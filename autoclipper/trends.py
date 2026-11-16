@@ -168,7 +168,8 @@ def pillar_hot(query: str, n: int = 8) -> list[Topic]:
 
 def next_pillars(cfg: Config, used: list[str], n: int) -> list[Pillar]:
     """The `n` pillars whose turn it is: never-used first (config order), then least recently used,
-    skipping any that already fills its max_share of the last `pillar_window` topics."""
+    skipping any that already fills its max_share of a `pillar_window` of topics (at least one
+    topic per window, so a capped pillar still gets a turn)."""
     t = cfg.trends
     w = t.pillar_window
     recent = list(used[-w:]) if w > 0 else []
@@ -177,8 +178,7 @@ def next_pillars(cfg: Config, used: list[str], n: int) -> list[Pillar]:
     def fits(p: Pillar) -> bool:
         if p.max_share >= 1 or w <= 0:
             return True
-        after = [*recent, p.name][-w:]
-        return after.count(p.name) <= p.max_share * len(after)
+        return [*recent, p.name][-w:].count(p.name) <= max(1, int(p.max_share * w))
 
     for _ in range(min(n, len(t.pillars))):
         last = {name: i for i, name in enumerate(recent)}
