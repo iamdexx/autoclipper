@@ -39,6 +39,16 @@ class State:
         }
         self.save()
 
+    def used_pillars(self) -> list[str]:
+        """Topic-mix pillars of every topic picked so far (trend and top10), oldest first."""
+        return list(self.data.get("pillars", []))
+
+    def mark_pillar(self, name: str) -> None:
+        if name:
+            self.data.setdefault("pillars", []).append(name)
+            del self.data["pillars"][:-200]
+            self.save()
+
     def record_post(self, video_id: str, clip: str, platform: str, result: dict, **about) -> None:
         """`about` (creator / hashtags / kind / hook) is what analytics groups performance by."""
         self.data["posts"].append(

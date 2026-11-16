@@ -9,6 +9,9 @@ jobs:
     timeout-minutes: 340
     concurrency: autoclipper
     steps:
+      # the runner ships ~14 GB free; a long VOD plus its clips has run it out of disk
+      - name: free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:

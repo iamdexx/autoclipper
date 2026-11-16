@@ -98,11 +98,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "trends":
         found = trends.discover(cfg)
         for tp in found[:40]:
-            print(f"{tp.traffic:>8}  {tp.source:<10} {tp.name}  {tp.headline[:50]}")
-        picked = trends.pick_topics(found, cfg, state.used_topics("trend"))
+            print(f"{tp.traffic:>8}  {tp.pillar or tp.source:<14} {tp.name}  {tp.headline[:50]}")
+        picked = trends.pick_topics(
+            found, cfg, state.used_topics("trend"), pillars_used=state.used_pillars()
+        )
         print("\npicked:")
         for tp in picked:
-            print(f"  {tp.name}  q={tp.query!r}  {tp.angle}")
+            print(f"  [{tp.pillar or '-'}] {tp.name}  q={tp.query!r}  {tp.angle}")
         if args.clip:
             run_trends(cfg, state, do_publish=args.publish)
             if args.publish:

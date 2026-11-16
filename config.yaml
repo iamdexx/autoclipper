@@ -45,7 +45,7 @@ publishing:
   schedule_ahead_h: 12       # a run uploads queued videos as scheduled YouTube posts this far ahead
   queue_max_age_h: 48        # the best-scoring queued video posts first; the rest age out
   queue_max_items: 24
-  cta: "Subscribe to Clipverse HQ for the best moments from streams, sports and the internet, every day."
+  cta: "Subscribe to Clipverse HQ for GTA 6 news, details and the best moments, every day."
 
 narration:
   provider: auto        # auto = edge (no key) > azure > google > elevenlabs > gemini > openai, next one when a call fails | off
@@ -59,16 +59,48 @@ narration:
   duck_db: -14
   max_len_s: 3.5        # the narrator's hook: one line, then the clip; longer is sped up (max 1.3x) or dropped
 
-# Trend mode: scrape what's blowing up (Google Trends + fresh YouTube uploads per niche), let the
-# LLM pick topics that fit your niches, find the best source video and clip it like a stream.
+# Trend mode: scrape what's blowing up, let the LLM pick topics, find the best source video and
+# clip it like a stream. The channel is about GTA 6: anything whose title doesn't name one of
+# focus_keywords is skipped (trend topics, source videos and the creators' uploads above).
 trends:
   enabled: true
-  niches: ["sports highlights", "gaming", "celebrity and internet drama", "tech news"]
+  focus: "GTA 6 (Grand Theft Auto VI)"
+  focus_keywords: ["gta 6", "gta vi", "gta", "grand theft auto"]
   geos: ["US"]
   topics_per_run: 2
   min_duration_s: 120
   max_duration_s: 7200
-  max_source_age_h: 24      # sources are searched freshest-first (last hour, today, any); older than this never
+  max_source_age_h: 72      # sources are searched freshest-first (last hour, today, any); older than this never
+  # The topic mix. Every run takes its topics from the pillars used least recently, one each, so
+  # the channel keeps rotating through all of them. max_share caps a pillar's share of the last
+  # pillar_window topics.
+  pillar_window: 20
+  pillars:
+    - name: news
+      queries: ["GTA 6 news", "GTA 6 release date", "Rockstar Games GTA 6 announcement"]
+      angle: "what Rockstar or Take-Two just confirmed, and what it means for players"
+    - name: trailers and details
+      queries: ["GTA 6 trailer breakdown", "GTA 6 trailer details you missed", "GTA 6 screenshots analysis"]
+      angle: "one detail from the official trailers or screenshots most people missed"
+    - name: map and world
+      queries: ["GTA 6 map", "GTA 6 Vice City Leonida", "GTA 6 locations"]
+      angle: "a place in Vice City or Leonida and what is known about it"
+    - name: characters and story
+      queries: ["GTA 6 Jason and Lucia", "GTA 6 characters", "GTA 6 story"]
+      angle: "who a character is and what the official material shows about them"
+    - name: gameplay and features
+      queries: ["GTA 6 gameplay features", "GTA 6 cars and vehicles", "GTA 6 online"]
+      angle: "one confirmed feature, vehicle or mechanic and why it matters"
+    - name: gta 5 vs gta 6
+      queries: ["GTA 5 vs GTA 6 comparison", "GTA 6 graphics comparison"]
+      angle: "one concrete side by side difference from the older games"
+    - name: streamers and community
+      queries: ["streamer reacts GTA 6", "GTA 6 reaction", "GTA RP funniest moments"]
+      angle: "a real reaction or funny moment from a streamer or the GTA community"
+    - name: clipping gta 6
+      queries: ["make money clipping GTA 6", "GTA 6 clipping channel", "GTA 6 content creator tips"]
+      angle: "how people build channels clipping GTA 6: practical steps, no income promises"
+      max_share: 0.15
 
 # "Top 10 ..." countdown videos: LLM writes the list, narrator voices every entry over footage
 # pulled from YouTube, stitched into one vertical video with rank badges + captions.
@@ -89,6 +121,7 @@ top10:
                         # music_generation permission on your key) | synth | off
   music_dir: ""         # folder of your own tracks; used if set / if generation fails
   music_db: -14         # bed level relative to the narration
+  music_prompt: "high-energy instrumental for a viral video game countdown video, driving drums and bass, modern trap-EDM hybrid, 130 bpm, builds tension, no vocals"
   topics: []            # fixed ideas e.g. ["craziest NFL plays this week"]; empty = from trends
 
 verify:                # fact-check gate for everything the narrator says (see README)

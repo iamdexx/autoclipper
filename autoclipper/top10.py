@@ -490,17 +490,22 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
     return _finish(parts, script.title, cfg, vdir)
 
 
-def pick_topic(cfg: Config, used: list[str]) -> tuple[str, str] | None:
-    """(topic, angle) for the next Top-10: from config.top10.topics, else from what's trending."""
+def pick_topic(cfg: Config, used: list[str], state=None) -> tuple[str, str] | None:
+    """(topic, angle) for the next Top-10: from config.top10.topics, else from what's trending.
+    With `state`, the pick takes its turn in the topic mix (trends.pillars) and is recorded."""
     fixed = [x for x in cfg.top10.topics if x.lower() not in {u.lower() for u in used}]
     if fixed:
         return fixed[0], ""
     if cfg.top10.topics:
         return None
-    picked = trends.pick_topics(trends.discover(cfg), cfg, used)
+    picked = trends.pick_topics(
+        trends.discover(cfg), cfg, used, pillars_used=state.used_pillars() if state else None
+    )
     if not picked:
         return None
     tp = picked[0]
+    if state:
+        state.mark_pillar(tp.pillar)
     return tp.name, tp.angle or tp.headline
 
 

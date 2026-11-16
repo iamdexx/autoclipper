@@ -12,6 +12,8 @@ from .state import State
 
 log = logging.getLogger(__name__)
 
+OFF_FOCUS = "skipped_off_focus"  # video status: title names none of trends.focus_keywords
+
 # Queue priority for an original Top-N video, on the 0-10 scale rank.rank() scores clip moments.
 TOP10_SCORE = 7.0
 
@@ -35,6 +37,10 @@ def process_video(
             meta.title,
             meta.live_status,
         )
+        return []
+    if not trends.on_focus(meta.title, cfg):
+        log.info("skipping %s (%s): not about %s", meta.id, meta.title, cfg.trends.focus)
+        state.mark_video(meta.id, OFF_FOCUS, title=meta.title, creator=creator.name)
         return []
     if meta.duration and not (creator.min_duration_s <= meta.duration <= creator.max_duration_s):
         log.info(
@@ -135,11 +141,14 @@ def run_creators(cfg: Config, state: State) -> int:
         log.info("no new videos")
         return 0
     n = 0
-    for creator, vid in todo[: cfg.max_videos_per_run]:
+    for creator, vid in todo:
+        if n >= cfg.max_videos_per_run:
+            break
         url = f"https://www.youtube.com/watch?v={vid}"
         try:
             process_video(url, creator, cfg, state)
-            n += 1
+            if state.data["videos"].get(vid, {}).get("status") != OFF_FOCUS:
+                n += 1  # an off-focus upload costs one probe, not one of the run's slots
         except Exception as e:
             log.exception("failed on %s: %s", vid, e)
             state.mark_video(vid, "error", error=str(e), creator=creator.name)
@@ -151,11 +160,16 @@ def run_trends(cfg: Config, state: State, do_publish: bool = True) -> int:
     found = trends.discover(cfg)
     log.info("%d trending topics found", len(found))
     picked = trends.pick_topics(
-        found, cfg, state.used_topics("trend"), history=analytics.summary(state)
+        found,
+        cfg,
+        state.used_topics("trend"),
+        history=analytics.summary(state),
+        pillars_used=state.used_pillars(),
     )
     n = 0
     for tp in picked:
         state.mark_topic("trend", tp.name, status="picked", query=tp.query)
+        state.mark_pillar(tp.pillar)
         try:
             src = trends.pick_source(tp, cfg)
         except Exception as e:
@@ -228,7 +242,7 @@ def make_top10(
 def run_top10(cfg: Config, state: State) -> int:
     n = 0
     for _ in range(cfg.top10.per_run):
-        pick = top10.pick_topic(cfg, state.used_topics("top10"))
+        pick = top10.pick_topic(cfg, state.used_topics("top10"), state)
         if not pick:
             log.info("no top10 topic available")
             break
