@@ -280,6 +280,17 @@ def test_pick_topics_takes_one_per_pillar_in_turn(tmp_path, monkeypatch):
     assert picked[0].pillar == "money"
 
 
+def test_untagged_trend_only_fills_a_pillar_about_its_subject(tmp_path):
+    from autoclipper.config import Pillar
+
+    cfg = _mix(_cfg(tmp_path))
+    cfg.trends.pillars = [Pillar("news", ["q"]), Pillar("gaming", ["g"], keywords=["zelda"])]
+    cfg.trends.topics_per_run = 2
+    zelda = Topic("Zelda remake", "google", 9000)
+    picked = trends.pick_topics([zelda], cfg, used=[], pillars_used=[])
+    assert [(t.name, t.pillar) for t in picked] == [("Zelda remake", "gaming")]
+
+
 def test_find_sources_drops_off_focus_videos(tmp_path, monkeypatch):
     cfg = _mix(_cfg(tmp_path))
     cands = [

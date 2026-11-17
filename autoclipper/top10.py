@@ -292,7 +292,11 @@ def fetch_footage(entry: Entry, secs: float, dest: Path, cfg: Config) -> Path | 
     except Exception as e:
         log.warning("footage search failed for %r: %s", entry.query, e)
         return None
-    cands = [c for c in cands if footage_matches(entry, c.title)]
+    cands = [
+        c
+        for c in cands
+        if footage_matches(entry, c.title) and trends.rights_ok(c.title, c.channel, cfg)
+    ]
     cands.sort(key=lambda c: -c.views)
     for c in cands[:3]:
         # skip the first ~20% (intros) and pull a window from there

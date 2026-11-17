@@ -60,7 +60,7 @@ def process_video(
     src = ingest.download(meta.url, vdir)
     segments = ingest.transcribe(src, cfg, vdir / "transcript.json")
     moments = rank.rank(segments, cfg, creator.name)
-    if cfg.verify.enabled and cfg.verify.check_hooks:
+    if cfg.verify.enabled:
         check_hooks(moments, segments, cfg, vdir / "factcheck.json")
     (vdir / "moments.json").write_text(json.dumps([asdict(m) for m in moments], indent=2))
     log.info("%s: %d moments picked", meta.id, len(moments))
@@ -119,14 +119,17 @@ def check_hooks(moments, segments, cfg: Config, report: Path) -> None:
     """The on-screen hook and the narrator's line must be faithful to the clip. Anything that
     fails verify.passes() (unsupported; unverifiable too in strict mode) is replaced: narration by
     the checker's faithful rewrite (or dropped - the clip keeps the creator's own audio), the
-    on-screen title by a line taken straight from the transcript."""
+    on-screen title by a line taken straight from the transcript. The take is checked even with
+    verify.check_hooks off, and is dropped unless it is positively supported."""
     rows = []
     for m in moments:
         text = " ".join(s.text for s in segments if s.end > m.start and s.start < m.end)
         claim = m.hook if not m.narration else f"{m.hook}. {m.narration}"
-        chk, fixed = verify.check_hook(claim, text, cfg)
-        rows.append({**verify.dump([chk])[0], "fixed": fixed})
-        if not verify.passes(chk, cfg):
+        chk = None
+        if cfg.verify.check_hooks:
+            chk, fixed = verify.check_hook(claim, text, cfg)
+            rows.append({**verify.dump([chk])[0], "fixed": fixed})
+        if chk and not verify.passes(chk, cfg):
             safe_hook = rank._hook_from_text(text) if text else ""
             log.warning(
                 "hook rejected (%s %s): %r / %r -> %r / %r",

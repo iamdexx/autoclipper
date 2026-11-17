@@ -360,6 +360,29 @@ def test_take_is_only_spoken_when_supported(tmp_path, monkeypatch):
     assert m.take == "" and m.narration == "Six regions confirmed."  # the hook is untouched
     verdict["v"] = "boom"  # a check that could not run never lets commentary through
     assert run("c.json").take == ""
+    cfg.verify.check_hooks = False  # the take is checked on its own switch
+    assert run("d.json").take == "" and run("d.json").hook == "SIX REGIONS"
+    verdict["v"] = "supported"
+    assert run("e.json").take == take
+    assert [r.get("kind") for r in json.loads((tmp_path / "e.json").read_text())] == ["take"]
+
+
+def test_top10_footage_skips_blocked_channels_and_excluded_titles(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.trends.blocked_channels = ["Rockstar Games"]
+    cfg.trends.exclude_keywords = ["highlights"]
+    cands = [
+        trends.Candidate("a", "GTA 6 map reveal", "rockstar games", 60, 9),
+        trends.Candidate("b", "GTA 6 map reveal highlights", "Fan", 60, 8),
+    ]
+    monkeypatch.setattr(trends, "yt_search", lambda q, n, **k: cands)
+    monkeypatch.setattr(top10, "footage_matches", lambda e, t: True)
+
+    def no_download(*a, **k):
+        raise AssertionError("prohibited footage was downloaded")
+
+    monkeypatch.setattr(top10.subprocess, "run", no_download)
+    assert top10.fetch_footage(top10.Entry(1, "map reveal", "l", "q"), 5, tmp_path, cfg) is None
 
 
 def test_unverifiable_hook_dropped_in_strict_mode(tmp_path, monkeypatch):
