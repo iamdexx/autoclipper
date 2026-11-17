@@ -4,7 +4,9 @@ import subprocess
 import time
 from pathlib import Path
 
-from autoclipper import narrate, qa, rank, render
+import pytest
+
+from autoclipper import metadata, narrate, pipeline, qa, queue, rank, render
 from autoclipper.config import Config
 from autoclipper.ingest import Segment, Word
 from autoclipper.rank import Moment
@@ -21,6 +23,7 @@ def _cfg(tmp_path):
     cfg.clips.target_len_s = 6
     cfg.clips.max_len_s = 10
     cfg.narration.provider = "off"
+    cfg.review.enabled = False
     return cfg
 
 
@@ -134,11 +137,11 @@ def test_hook_card_pops_in_and_outlasts_a_short_intro(tmp_path):
     )
 
 
-def test_heuristic_narration_is_one_line(tmp_path):
+def test_heuristic_pick_has_no_narrator_line(tmp_path):
+    # its "hook" is the clip's own first sentence: saying it first makes the line play twice
     cfg = _cfg(tmp_path)
     m = rank.rank_heuristic([(0.0, 6.0, "No way, he actually did it. Insane, bro!")], cfg)[0]
-    assert m.narration == f"{m.hook}." and len(m.narration.split()) <= 9
-    assert "max 9 words" in rank.PROMPT and "3-6 word" in rank.PROMPT
+    assert m.hook and m.narration == ""
 
 
 def test_render_adds_the_take_after_the_clip(tmp_path, monkeypatch):
@@ -1254,3 +1257,229 @@ def test_queue_records_what_the_post_was_about(tmp_path, monkeypatch):
 def test_workflow_persists_queue_with_state():
     wf = (ROOT / ".github" / "workflows" / "clip.yml").read_text()
     assert wf.count("data/queue") == 2 and wf.count("data/state.json") == 2
+
+
+def test_filler_is_caught_and_plain_facts_are_not():
+    from autoclipper import slop
+
+    for line in (
+        "Comparing 13 years of upgrades is absolutely mind-blowing.",
+        "You will not believe what GTA 6 changed.",
+        "Requiring key cloners adds a completely fresh tactical layer.",
+        "Wait for what he says about natural disasters.",
+    ):
+        assert slop.filler(line), line
+    for line in (
+        "Rockstar says some parked cars need a key cloner.",
+        "Filling the tank takes about ten seconds, and Rockstar has not said how often.",
+        "Wilder was not there",  # whole words only
+    ):
+        assert not slop.filler(line), line
+
+
+def test_ranker_drops_filler_lines_and_never_guesses_when_the_model_is_down(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.llm_provider = "gemini"
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    segs = _segments()
+    picks = [
+        {"start": 0, "end": 8, "hook": "Cars Need A Key Cloner", "score": 9,
+         "narration": "Rockstar says some parked cars need a key cloner.",
+         "take": "This insane change redefines everything."},
+        {"start": 10, "end": 18, "hook": "x", "score": 5, "narration": "You won't believe this."},
+    ]  # fmt: skip
+    monkeypatch.setattr(rank, "_call_gemini", lambda p, m: json.dumps(picks))
+    a, b = rank.rank(segs, cfg, "c")
+    assert a.narration.startswith("Rockstar says") and a.take == "" and b.narration == ""
+
+    def down(p, m):
+        raise RuntimeError("429")
+
+    monkeypatch.setattr(rank, "_call_gemini", down)
+    with pytest.raises(rank.Unavailable):
+        rank.rank(segs, cfg, "c")
+    cfg.clips.heuristic_fallback = True
+    assert rank.rank(segs, cfg, "c")
+    monkeypatch.setattr(rank, "_call_gemini", lambda p, m: "[]")  # nothing worth posting
+    assert rank.rank(segs, cfg, "c") == []
+
+
+def test_clip_ends_where_a_sentence_ends():
+    segs = [
+        Segment(0, 4, "Some parked cars are locked", []),
+        Segment(4, 7, "until you own a key cloner.", []),
+        Segment(7, 9, "And the next thing", []),
+    ]
+    assert rank._snap(4.4, segs, to_end=True) == 7  # 4.0 is nearer, but mid-sentence
+    assert rank._snap(6.0, segs, to_end=False) == 7  # starts after the full stop
+
+
+def test_source_in_another_language_or_with_nobody_on_camera_is_skipped(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from autoclipper import ingest, reframe, review
+
+    cfg = _cfg(tmp_path)
+    meta = SimpleNamespace(title="t", uploader="u", duration=600)
+    cache = tmp_path / "transcript.json"
+    lang = {"language": "hi", "prob": 0.99}
+    monkeypatch.setattr(ingest, "language", lambda c: (lang["language"], lang["prob"]))
+    share = {"v": 0.4}
+    monkeypatch.setattr(reframe, "face_share", lambda src, dur: share["v"])
+    why = lambda: pipeline.source_problem(tmp_path / "s.mp4", meta, [], cfg, cache)  # noqa: E731
+    assert "hi" in why()
+    lang.update(language="en", prob=0.4)  # whisper is guessing: mixed or unclear speech
+    assert why()
+    lang.update(prob=0.99)
+    assert why() == ""
+    share["v"] = 0.0
+    assert "face" in why()
+    share["v"] = None  # could not be measured: not a reason to skip
+    assert why() == ""
+    cfg.review.enabled = True
+    verdict = review.Verdict(False, problems=["synthetic_voice"], note="tts over articles")
+    monkeypatch.setattr(review, "source", lambda *a: verdict)
+    assert "synthetic_voice" in why()
+    verdict.ok = None  # the reviewer is down: the finished clips are still reviewed later
+    assert why() == ""
+
+
+def test_video_made_while_the_editor_model_is_down_is_retried(tmp_path, monkeypatch):
+    from autoclipper import ingest
+    from autoclipper.state import State
+
+    cfg = _cfg(tmp_path)
+    state = State(tmp_path / "state.json")
+    meta = ingest.VideoMeta("vid1", "https://y/vid1", "GTA 6 news", 600, "Chan")
+    monkeypatch.setattr(ingest, "probe", lambda url, name: meta)
+    monkeypatch.setattr(ingest, "download", lambda url, d: tmp_path / "s.mp4")
+    monkeypatch.setattr(ingest, "transcribe", lambda *a: _segments())
+    monkeypatch.setattr(pipeline, "source_problem", lambda *a: "")
+
+    def down(*a):
+        raise rank.Unavailable("gemini 429")
+
+    monkeypatch.setattr(rank, "rank", down)
+    assert pipeline.process_video(meta.url, cfg.creators[0], cfg, state, pillar=None) == []
+    assert not state.seen("vid1")
+
+
+def test_nothing_posts_until_it_passes_the_review(tmp_path, monkeypatch):
+    from autoclipper import review
+
+    cfg = _cfg(tmp_path)
+    cfg.review.enabled, cfg.review.max_attempts = True, 2
+    for name, score in (("good", 9.0), ("slop", 8.0), ("later", 7.0)):
+        f = tmp_path / f"{name}.mp4"
+        f.write_bytes(b"x")
+        queue.enqueue(f, "clip", name, score, metadata.PostMeta(f"GTA 6 {name}", "d", []), cfg)
+    verdicts = {
+        "good.mp4": review.Verdict(True, 8),
+        "slop.mp4": review.Verdict(False, 3, ["hype_filler"]),
+        "later.mp4": review.Verdict(None),
+    }
+    asked = []
+
+    def fake(path, kind, c):
+        asked.append(path.name)
+        return verdicts[path.name]
+
+    monkeypatch.setattr(review, "video", fake)
+    queue.review_pending(cfg)
+    left = {it.video: it for it in queue.items(cfg)}
+    assert set(left) == {"good.mp4", "later.mp4"}
+    assert left["good.mp4"].reviewed and not left["later.mp4"].reviewed
+    queue.review_pending(cfg)  # a pass is not asked for twice; two failed tries and it is gone
+    assert asked.count("good.mp4") == 1 and [it.video for it in queue.items(cfg)] == ["good.mp4"]
+
+
+def test_review_verdict_needs_a_clean_checklist_and_a_high_score(tmp_path, monkeypatch):
+    from autoclipper import ingest, review
+
+    cfg = _cfg(tmp_path)
+    f = tmp_path / "v.mp4"
+    f.write_bytes(b"x")
+    monkeypatch.setattr(ingest, "transcribe", lambda *a: [Segment(0, 1, "said", [])])
+    monkeypatch.setattr(review, "frames", lambda *a, **k: [b"jpg"])
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    answer = {"problems": [], "score": 8, "note": "n"}
+    monkeypatch.setattr(rank, "_call_gemini", lambda p, m, images=None: json.dumps(answer))
+    assert review.video(f, "clip", cfg).ok is True
+    answer["score"] = 6
+    assert review.video(f, "clip", cfg).ok is False
+    answer.update(score=9, problems=["foreign_overlays"])
+    v = review.video(f, "top10", cfg)
+    assert v.ok is False and json.loads(f.with_suffix(".review.json").read_text())["problems"]
+    monkeypatch.delenv("GEMINI_API_KEY")
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    assert review.video(f, "clip", cfg).ok is None  # no reviewer is not a pass
+
+
+def test_explainer_is_built_from_photos_with_its_title_and_never_thumbnails(tmp_path, monkeypatch):
+    from autoclipper import images, top10
+
+    cfg = _cfg(tmp_path)
+    cfg.top10.style, cfg.top10.music, cfg.verify.min_entries = "explainer", "off", 3
+    asked, shown = [], []
+
+    def fetch(query, name, dest, thumbs=True):
+        asked.append(thumbs)
+        return tmp_path / f"{name}.jpg"
+
+    def still(image, dur, voice, words, c, out, zoom_in=True, title="", fill=False):
+        assert fill
+        shown.append((image.stem, title, zoom_in))
+        return out
+
+    monkeypatch.setattr(images, "fetch", fetch)
+    monkeypatch.setattr(render, "render_still", still)
+    monkeypatch.setattr(top10, "_finish", lambda parts, title, c, vdir: vdir / "out.mp4")
+    script = top10.Script(
+        "ice age",
+        "How Humans Survived The Ice Age",
+        "",  # the intro failed its check: the title is said instead
+        entries=[top10.Entry(3 - i, n, f"line {n}", n) for i, n in enumerate(["a", "b", "c"])],
+    )
+    top10.build(script, cfg, tmp_path / "v")
+    assert asked == [False, False, False]
+    assert shown[0][:2] == ("a", "How Humans Survived The Ice Age")
+    assert [s[0] for s in shown] == ["a", "a", "b", "c"] and not any(s[1] for s in shown[1:])
+    assert [s[2] for s in shown] == [False, True, False, True]  # the push alternates
+    assert script.title == "How Humans Survived The Ice Age"
+    assert top10.narration_text(script, cfg).startswith("How Humans Survived")
+
+
+def test_every_third_explainer_is_on_an_open_subject(tmp_path, monkeypatch):
+    from autoclipper import top10, trends
+
+    cfg = _cfg(tmp_path)
+    cfg.top10.style, cfg.top10.open_topic_every, cfg.top10.topics = "explainer", 3, []
+    monkeypatch.setattr(
+        trends,
+        "_llm",
+        lambda p, c: '{"topic": "How humans survived the Ice Age", "wiki": "Last Glacial Period"}',
+    )
+    monkeypatch.setattr(trends, "discover", lambda c: [])
+    monkeypatch.setattr(trends, "pick_topics", lambda *a, **k: [])
+    assert top10.pick_topic(cfg, ["a"]) is None  # 2nd: follows the topic mix (nothing trending)
+    assert top10.pick_topic(cfg, ["a", "b"]) == (
+        "How humans survived the Ice Age",
+        "Last Glacial Period",
+    )
+    monkeypatch.setattr(
+        trends, "_llm", lambda p, c: '{"topic": "Best Premier League goals", "wiki": "x"}'
+    )
+    assert top10.pick_topic(cfg, ["a", "b"]) is None  # never a subject on the exclusion list
+
+
+def test_own_scripted_video_is_not_pruned_for_being_off_focus(tmp_path):
+    cfg = _cfg(tmp_path)
+    for name, kind, title in (
+        ("ice", "top10", "How Humans Survived The Ice Age"),
+        ("epl", "top10", "Ranking Premier League Goals"),
+        ("cook", "clip", "A cooking stream"),
+    ):
+        f = tmp_path / f"{name}.mp4"
+        f.write_bytes(b"x")
+        queue.enqueue(f, kind, name, 5.0, metadata.PostMeta(title, "d", [], ""), cfg)
+    assert [it.video for it in queue.prune(cfg)] == ["ice.mp4"]

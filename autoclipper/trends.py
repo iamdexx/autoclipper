@@ -266,10 +266,13 @@ TRENDING:
 
 PICK_SOURCE = """Trend: {topic}
 Angle: {angle}
-Which ONE of these YouTube videos is the best source to clip a viral short from - most relevant,
-real footage (not reaction/commentary unless the trend is about that), from a credible channel,
-as fresh as possible (a Short about a moment everyone has already seen gets swiped past), high
-views? Return ONLY JSON: {{"id": "<video id>", "reason": "<short>"}}
+Which ONE of these YouTube videos is the best source to clip a short from? Prefer, in this order:
+a real person on camera who made or reported the thing themselves (a creator, a journalist, a
+developer interview) speaking English; most relevant to the trend; as fresh as possible; high
+views. Avoid faceless channels that read articles over footage with a synthetic voice,
+compilations, re-uploads, "N things" listicles and videos not in English - return an empty id if
+every option is one of those.
+Return ONLY JSON: {{"id": "<video id or empty>", "reason": "<short>"}}
 
 {videos}
 """
@@ -443,6 +446,9 @@ def pick_source(topic: Topic, cfg: Config) -> Candidate | None:
     try:
         raw = _llm(PICK_SOURCE.format(topic=topic.name, angle=topic.angle, videos=listing), cfg)
         chosen = json.loads(raw.strip().strip("`"))["id"]
+        if not chosen:
+            log.info("no source worth clipping for %r", topic.name)
+            return None
         for c in cands:
             if c.id == chosen:
                 return c

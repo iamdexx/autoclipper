@@ -11,7 +11,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import publish, trends
+from . import publish, review, trends
 from .config import Config
 from .metadata import PostMeta
 from .state import State
@@ -34,6 +34,8 @@ class Item:
     hashtags: list[str] = field(default_factory=list)
     added: float = 0.0
     attempts: int = 0
+    reviewed: bool = False  # passed the editor's pass (review.py)
+    review_tries: int = 0  # runs it has waited for a review that could not be run
 
     @property
     def age_h(self) -> float:
@@ -113,7 +115,10 @@ def prune(cfg: Config) -> list[Item]:
     keep: list[Item] = []
     for it in items(cfg):
         text = " ".join([it.meta.title, it.meta.description, it.hook, *it.meta.hashtags])
-        if not trends.on_focus(text, cfg):
+        # the channel's own scripted videos chose their subject on purpose (an explainer may be
+        # about anything); they only have to stay clear of trends.exclude_keywords
+        own = it.kind == "top10" and trends.rights_ok(text, "", cfg)
+        if not own and not trends.on_focus(text, cfg):
             log.info("queue: dropping %s (not about %s)", it.video, cfg.trends.focus)
             remove(cfg, it)
         elif it.age_h > p.queue_max_age_h:
@@ -125,6 +130,37 @@ def prune(cfg: Config) -> list[Item]:
         else:
             keep.append(it)
     return keep
+
+
+def review_pending(cfg: Config) -> None:
+    """The editor's pass (review.py) on queued videos that have not had it, best first: a pass is
+    recorded, a fail is deleted, and one whose review could not be run waits for the next run
+    (at most review.max_attempts of them). Covers videos queued before the pass existed too."""
+    if not cfg.review.enabled:
+        return
+    for it in items(cfg):
+        if it.reviewed:
+            continue
+        v = review.video(_dir(cfg) / it.id / it.video, it.kind, cfg)
+        if v.ok is None:
+            it.review_tries += 1
+            if it.review_tries >= cfg.review.max_attempts:
+                log.info("queue: dropping %s (never reviewed)", it.video)
+                remove(cfg, it)
+            else:
+                _save(cfg, it)
+            break  # the reviewer is down or out of quota: the rest wait too
+        if v.ok:
+            it.reviewed = True
+            _save(cfg, it)
+        else:
+            log.info(
+                "queue: dropping %s (review: score %d, %s)",
+                it.video,
+                v.score,
+                ", ".join(v.problems) or v.note,
+            )
+            remove(cfg, it)
 
 
 def _next(rest: list[Item], recent: list[str], cfg: Config) -> Item:
@@ -142,10 +178,11 @@ def _next(rest: list[Item], recent: list[str], cfg: Config) -> Item:
 
 def drain(cfg: Config, state: State, force: bool = False) -> list[Item]:
     """Post queued videos best-first until every enabled platform is over budget. A video is
-    removed once nothing is waiting on budget (posted, dry-run, or given up after MAX_ATTEMPTS
+    only posted once it has passed the editor's pass (review.py), and removed once nothing is waiting on budget (posted, dry-run, or given up after MAX_ATTEMPTS
     errors); returns the items that went out."""
     posted: list[Item] = []
-    rest = prune(cfg)
+    review_pending(cfg)
+    rest = [it for it in prune(cfg) if it.reviewed or not cfg.review.enabled]
     while rest:
         # asked again after every upload: one that failed has not used up a slot of its format
         it = _next(rest, state.posted_kinds(cfg.publishing.max_per_day), cfg)

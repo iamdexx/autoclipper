@@ -63,10 +63,26 @@ from Edge and ElevenLabs directly; every other provider's audio is run through W
 aligned to the script so the highlight tracks the voice just the same. Tune `duck_db`,
 `max_len_s`, or set `provider: off` in `config.yaml` to keep only the creator's own audio.
 
-With `narration.take` on, every clip also ends on the channel's own commentary: the ranker writes
-two sentences on what the moment means, the fact-check gate compares them with the clip's
-transcript (unsupported or uncheckable commentary is not spoken), and the narrator says them
-after the last line while the footage rolls on with its audio ducked.
+With `narration.take` on, a clip can end on the channel's own line: context the clip leaves out,
+taken from elsewhere in the same video (a caveat, a number, what is still unconfirmed). The
+fact-check gate compares it with the whole transcript and only lets it through when it is
+faithful and adds something the clip does not say; a restatement, or a line that could not be
+checked, is not spoken. The narrator says it after the last line while the footage rolls on with
+its audio ducked.
+
+Nothing the narrator says may be filler: `slop.py` lists the hype words and stock phrases
+("mind-blowing", "you won't believe", "changes everything") and a hook, take or script line that
+contains one is dropped, not rewritten.
+
+## Source quality
+
+A video is only cut from when it is worth cutting from: spoken in one of `trends.languages`
+(whisper's detection, at least `min_language_prob` sure), with a person on camera in at least
+`min_face_share` of sampled frames, and, with `review.enabled`, passing a source review that
+rejects slideshows of article screenshots, text-to-speech narration, burned-in captions and
+other channels' subscribe overlays. When the model that picks moments is unavailable nothing is
+cut and the video is retried on a later run (`clips.heuristic_fallback: true` brings back the
+keyword-based picker).
 
 ## Trends
 
@@ -99,7 +115,15 @@ instead of `focus_keywords` (creator uploads still need the main focus). The sha
 in the list is their share of uploads. `trends.exclude_keywords` are never clipped, whichever
 pillar they turn up in.
 
-## Top 10 videos
+## Explainers and Top 10 videos
+
+`top10.style: explainer` is the channel's own format: a scripted "How / Why ..." story (for
+example "How Humans Survived The Ice Age") told in `top10.items` beats, each a fact taken from
+news and Wikipedia text fetched for the script and checked against it (video titles are not
+evidence), each shown over a real photo (a Wikipedia article's lead image, else Wikimedia Commons;
+never another channel's thumbnail) that fills the frame while the camera travels across it. The
+subject follows the topic mix, and every `open_topic_every`-th one is on any subject the writer
+proposes.
 
 `autoclipper top10 "craziest NFL plays this week"` (or no topic: picked from trends /
 `top10.topics`) makes one vertical ranked video in one of three styles (`top10.style`):
@@ -152,6 +176,16 @@ Nothing the narrator says goes out unchecked (`verify.py`):
   (`data/videos/<id>/factcheck.json`).
 - `autoclipper factcheck data/top10/<slug>/script.json` audits an existing script (exit 1 if
   anything fails); `autoclipper factcheck "some claim" --query "search terms"` checks one claim.
+
+## Editor's pass (`review:`)
+
+The quality gate below proves a file plays; this one decides whether it is worth watching. A
+vision model gets frames of the finished video and everything said in it and answers a viewer's
+checklist: English, clean captions, no other channel's overlays, the picture fills the frame and
+matches what is said, it says something specific, it does not repeat itself or stop mid-thought,
+plus a 1-10 score (7 to pass). Videos wait in the queue until they pass; a fail is deleted; when
+the review cannot be run (no key, quota) the video waits for the next run, up to
+`review.max_attempts` runs. It needs a Gemini key and costs one request per video.
 
 ## Quality gate (`qa:`)
 

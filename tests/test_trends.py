@@ -33,7 +33,7 @@ def _cfg(tmp_path):
 def test_config_sections_load():
     cfg = Config.load(ROOT / "config.yaml")
     assert cfg.trends.geos == ["US"]
-    assert cfg.top10.items == 6 and cfg.top10.style == "ranking"
+    assert cfg.top10.items == 7 and cfg.top10.style == "explainer"
     assert cfg.narration.elevenlabs_voice == "TX3LPaxmHKxFdv7VOQHJ"  # Liam
 
 

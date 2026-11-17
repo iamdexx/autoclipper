@@ -63,6 +63,50 @@ def commons(query: str, n: int = 8) -> list[tuple[str, str]]:
     return out
 
 
+_NOT_A_PHOTO = re.compile(
+    r"\b(map|plan|drawing|diagram|chart|logo|icon|flag|seal|coat of arms|blueprint|sketch|"
+    r"engraving|scan|page|pdf|svg|locator|schematic|poster|cover|screenshot)\b",
+    re.I,
+)
+
+
+def photo(title: str) -> bool:
+    """False for file names that say the image is a document or a graphic, not a photograph."""
+    return not _NOT_A_PHOTO.search(title)
+
+
+def wikipedia_lead(query: str, n: int = 3) -> list[tuple[str, str]]:
+    """[(article title, url)] - the freely licensed lead photo of the Wikipedia articles that
+    best match the query: picked by editors to show the subject, unlike a file-name search."""
+    r = requests.get(
+        "https://en.wikipedia.org/w/api.php",
+        params={
+            "action": "query",
+            "format": "json",
+            "generator": "search",
+            "gsrsearch": query,
+            "gsrlimit": n,
+            "prop": "pageimages",
+            "piprop": "thumbnail|name",
+            "pithumbsize": 1600,
+            "pilicense": "free",
+        },
+        headers=_UA,
+        timeout=30,
+    )
+    r.raise_for_status()
+    pages = sorted(
+        (r.json().get("query") or {}).get("pages", {}).values(), key=lambda p: p.get("index", 99)
+    )
+    return [
+        (p.get("title", ""), p["thumbnail"]["source"])
+        for p in pages
+        if p.get("thumbnail")
+        and int(p["thumbnail"].get("width") or 0) >= 600
+        and photo(p.get("pageimage", ""))
+    ]
+
+
 def youtube_thumbs(query: str, n: int = 8) -> list[tuple[str, str]]:
     return [
         (c.title, f"https://i.ytimg.com/vi/{c.id}/maxresdefault.jpg")
@@ -100,14 +144,15 @@ def is_image(path: Path) -> bool:
     return w >= 320 and h >= 240
 
 
-def fetch(query: str, name: str, dest: Path) -> Path | None:
-    """One relevant image for `query` (entry `name` also counts as a match), cached on disk."""
+def fetch(query: str, name: str, dest: Path, thumbs: bool = True) -> Path | None:
+    """One relevant image for `query` (entry `name` also counts as a match), cached on disk.
+    `thumbs=False`: real photos only, never a YouTube thumbnail."""
     dest.mkdir(parents=True, exist_ok=True)
     key = hashlib.sha1(f"{name}|{query}".encode()).hexdigest()[:8]
     out = dest / f"{key}.jpg"
     if out.exists() and is_image(out):
         return out
-    for source in (commons, youtube_thumbs):
+    for source in (commons, youtube_thumbs) if thumbs else (wikipedia_lead, commons):
         try:
             cands = source(query)
         except Exception as e:
@@ -115,6 +160,8 @@ def fetch(query: str, name: str, dest: Path) -> Path | None:
             continue
         for title, url in cands:
             if not (matches(query, title) or matches(name, title)):
+                continue
+            if not thumbs and not photo(title):
                 continue
             if _download(url, out):
                 log.info("image for %r: %s", name, title)

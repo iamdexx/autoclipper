@@ -17,17 +17,16 @@ SAMPLE_W = 640
 MIN_HITS = 0.3  # share of sampled frames that must show a face to trust it
 
 
-def focus_x(source: Path, start: float, dur: float) -> float | None:
-    """Horizontal centre (0..1) of the face the clip should stay on, or None when no face is
-    seen often enough (wide shots, gameplay) - callers then crop the middle."""
+def _faces(source: Path, start: float, dur: float, n: int) -> tuple[list[float], int] | None:
+    """(x centre 0..1 of the biggest face in each sampled frame that shows one, frames read), or
+    None without OpenCV."""
     try:
         import cv2
     except ImportError:  # pragma: no cover - optional dependency
-        log.info("reframe: opencv not installed, cropping the centre")
         return None
     casc = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
     xs: list[float] = []
-    n = max(1, min(SAMPLES, int(dur)))
+    read = 0
     with tempfile.TemporaryDirectory() as td:
         for i in range(n):
             t = start + dur * (i + 0.5) / n
@@ -42,12 +41,37 @@ def focus_x(source: Path, start: float, dur: float) -> float | None:
             img = cv2.imread(str(f))
             if img is None:
                 continue
+            read += 1
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             faces = casc.detectMultiScale(gray, 1.1, 5, minSize=(28, 28))
             if len(faces) == 0:
                 continue
             x, _, w, _ = max(faces, key=lambda r: r[2] * r[3])  # the biggest face leads
             xs.append((x + w / 2) / img.shape[1])
+    return xs, read
+
+
+def face_share(source: Path, dur: float, samples: int = 40) -> float | None:
+    """Share of frames sampled across the whole video that show a face: near zero for a
+    text-to-speech voice over screenshots or gameplay, well above it for a person on camera.
+    None when it could not be measured."""
+    if dur <= 0:
+        return None
+    found = _faces(source, 0.0, dur, samples)
+    if not found or not found[1]:
+        return None
+    return len(found[0]) / found[1]
+
+
+def focus_x(source: Path, start: float, dur: float) -> float | None:
+    """Horizontal centre (0..1) of the face the clip should stay on, or None when no face is
+    seen often enough (wide shots, gameplay) - callers then crop the middle."""
+    n = max(1, min(SAMPLES, int(dur)))
+    found = _faces(source, start, dur, n)
+    if found is None:
+        log.info("reframe: opencv not installed, cropping the centre")
+        return None
+    xs = found[0]
     if len(xs) < max(1, round(n * MIN_HITS)):
         log.info("reframe: face in %d/%d frames, cropping the centre", len(xs), n)
         return None

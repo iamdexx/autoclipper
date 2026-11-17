@@ -23,6 +23,8 @@ def _cfg(tmp_path):
     cfg.workdir = tmp_path
     cfg.llm_provider = "heuristic"
     cfg.narration.provider = "off"
+    cfg.review.enabled = False
+    cfg.top10.style, cfg.top10.items, cfg.verify.min_entries = "ranking", 6, 4
     return cfg
 
 
@@ -41,7 +43,7 @@ def _script(n=10):
 
 def test_verify_config_loads():
     cfg = Config.load(ROOT / "config.yaml")
-    assert cfg.verify.enabled and cfg.verify.min_entries == 4 and not cfg.verify.strict
+    assert cfg.verify.enabled and cfg.verify.min_entries == 5 and not cfg.verify.strict
     assert cfg.verify.strict_top10
 
 
@@ -241,13 +243,13 @@ def test_check_hook_rewrites_unfaithful(tmp_path, monkeypatch):
         "_llm",
         lambda p, c: (
             '{"verdict": "unsupported", "confidence": 0.9, "note": "no boss", '
-            '"fixed": "Wait for what he says about his garage."}'
+            '"fixed": "He says the company started in a garage."}'
         ),
     )
     segs = [Segment(0, 5, "we started in a garage", []), Segment(5, 10, "then apple grew", [])]
     m = Moment(0, 8, "hook", "r", 1.0, narration="Wait for what he says about his boss!")
     pipeline.check_hooks([m], segs, cfg, tmp_path / "fc.json")
-    assert m.narration == "Wait for what he says about his garage."
+    assert m.narration == "He says the company started in a garage."
     rows = json.loads((tmp_path / "fc.json").read_text())
     assert rows[0]["verdict"] == "unsupported" and rows[0]["fixed"]
 
@@ -273,7 +275,7 @@ def test_factcheck_cli_exit_code(tmp_path, monkeypatch):
     monkeypatch.setattr(
         verify,
         "check_claims",
-        lambda claims, c: [verify.Check(cl, next(verdicts), 0.9, "n") for cl, _ in claims],
+        lambda claims, c, **k: [verify.Check(cl, next(verdicts), 0.9, "n") for cl, _ in claims],
     )
     args = ["-c", str(ROOT / "config.yaml"), "factcheck", str(d / "script.json")]
     monkeypatch.chdir(tmp_path)
@@ -342,7 +344,9 @@ def test_take_is_only_spoken_when_supported(tmp_path, monkeypatch):
             return '{"verdict": "supported", "confidence": 0.9, "note": "ok"}'
         if verdict["v"] == "boom":
             raise RuntimeError("503")
-        return json.dumps({"verdict": verdict["v"], "confidence": 0.9, "note": "n"})
+        return json.dumps(
+            {"verdict": verdict["v"], "adds": verdict.get("adds", True), "confidence": 0.9}
+        )
 
     monkeypatch.setattr(trends, "_llm", llm)
     take = "Six regions means the biggest map Rockstar has made."
@@ -362,7 +366,9 @@ def test_take_is_only_spoken_when_supported(tmp_path, monkeypatch):
     assert run("c.json").take == ""
     cfg.verify.check_hooks = False  # the take is checked on its own switch
     assert run("d.json").take == "" and run("d.json").hook == "SIX REGIONS"
-    verdict["v"] = "supported"
+    verdict.update(v="supported", adds=False)  # faithful, but only restates the clip
+    assert run("e.json").take == ""
+    verdict.update(v="supported", adds=True)
     assert run("e.json").take == take
     assert [r.get("kind") for r in json.loads((tmp_path / "e.json").read_text())] == ["take"]
 
@@ -402,3 +408,40 @@ def test_unverifiable_hook_dropped_in_strict_mode(tmp_path, monkeypatch):
     m = Moment(0, 5, "hook", "r", 1.0, narration="narration")
     pipeline.check_hooks([m], [], cfg, tmp_path / "c.json")  # no transcript = unverifiable
     assert m.narration == ""
+
+
+def test_explainer_is_checked_without_video_titles_and_drops_filler(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.top10.style = "explainer"
+    seen = {}
+
+    def gather(q, titles=True):
+        seen[q] = titles
+        return [
+            verify.Evidence("article", "Ice age: people sewed fitted clothing with bone needles")
+        ]
+
+    monkeypatch.setattr(verify, "gather", gather)
+    monkeypatch.setattr(
+        trends,
+        "_llm",
+        lambda p, c: json.dumps(
+            [{"i": i, "verdict": "supported", "confidence": 0.9, "note": "n"} for i in range(3)]
+        ),
+    )
+    script = top10.Script(
+        "How humans survived the Ice Age",
+        "How Humans Survived The Ice Age",
+        "Half of Europe was under ice, and people stayed.",
+        entries=[
+            top10.Entry(
+                2, "Bone needles", "They sewed fitted clothing with bone needles.", "bone needle"
+            ),
+            top10.Entry(1, "Fire", "This insane trick changes everything.", "hearth"),
+        ],
+    )
+    checks = top10.fact_check(script, cfg)
+    assert set(seen.values()) == {False}  # a video title is not evidence for a story
+    assert "bone needle" not in seen  # the photo search is not what gets fact-checked
+    assert [c.verdict for c in checks[:2]] == ["supported", "unsupported"]
+    assert "filler" in checks[1].note and script.intro

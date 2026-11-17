@@ -12,7 +12,7 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import images, ingest, narrate, render, sfx, trends, verify
+from . import images, ingest, narrate, render, sfx, slop, trends, verify
 from .config import Config
 from .ingest import Word
 
@@ -104,7 +104,46 @@ Return ONLY JSON:
                 "query": "<YouTube search that finds footage of exactly this>"}}, ...]}}
 """
 
-_PROMPTS = {"countdown": SCRIPT_PROMPT, "listicle": LISTICLE_PROMPT, "ranking": RANKING_PROMPT}
+EXPLAINER_PROMPT = """Write the script for a short narrated explainer (TikTok / Reels / Shorts,
+45-60 seconds) about: {topic}
+Context: {angle}
+It is a story, not a list. The title is a question or claim people want answered ("How Humans
+Survived The Ice Age", "Why GTA 6 Took 13 Years"). The intro states the puzzle in one sentence.
+Then {n} beats, each one or two sentences, each adding ONE specific fact that moves the story
+forward (who, what number, what happened next), in the order a good teacher would tell it. The
+last beat answers the title. A viewer who stops after any beat should already have learned
+something.
+{rules}
+Use ONLY facts that appear in the SOURCES below; if the sources do not support {n} beats, return
+fewer. No predictions, no rumours stated as fact.
+{sources}{avoid}
+Every beat is shown over ONE real photograph from Wikimedia Commons, so "query" must name a
+real-world subject a photo exists of (a place, a person, an object, a building, an animal), 2-4
+words, proper nouns first - never a game screenshot, a logo or an abstract idea.
+Narration is plain spoken words only: no emojis, hashtags, stage directions or numbering.
+Return ONLY JSON:
+{{"title": "<the question or claim, max 9 words, Title Case>",
+  "intro": "<the puzzle in one sentence, max 18 words>",
+  "hashtags": ["#a", "#b", "#c", "#d"],
+  "entries": [{{"rank": {n}, "name": "<beat label, max 4 words>",
+                "line": "<1-2 sentences, 14-26 words, one concrete fact>",
+                "query": "<Wikimedia Commons photo search>"}}, ...]}}
+"rank" counts down: the first beat told is {n}, the last is 1.
+"""
+
+IDEA_PROMPT = """Propose ONE subject for a 60-second narrated explainer video in the style of "How
+humans survived the Ice Age" or "Why the Titanic's lookouts had no binoculars": a concrete
+question from history, science, engineering, nature, games or film whose real answer surprises
+people, and that the English Wikipedia covers well. Not any of: {used}.
+Return ONLY JSON: {{"topic": "<the question, max 10 words>", "wiki": "<the Wikipedia article that answers it>"}}
+"""
+
+_PROMPTS = {
+    "countdown": SCRIPT_PROMPT,
+    "listicle": LISTICLE_PROMPT,
+    "ranking": RANKING_PROMPT,
+    "explainer": EXPLAINER_PROMPT,
+}
 
 SOURCES_NOTE = """SOURCES - real headlines and video titles about this topic, fetched just now. Your own
 knowledge ends before recent events, so every entry MUST be a moment that appears in (or is
@@ -118,12 +157,18 @@ def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:40] or "top10"
 
 
-def sources_for(topic: str, angle: str, n: int) -> str:
+def sources_for(topic: str, angle: str, n: int, titles: bool = True) -> str:
     """Evidence block for the script prompt: the same keyless retrieval the fact-check judges
-    against (news, wiki, YouTube titles), so the writer picks moments that will later verify."""
-    ev = verify.gather(topic)
-    if angle and angle.lower() not in topic.lower():
-        ev += verify.gather(f"{topic} {angle}"[:120])
+    against (news, wiki, and YouTube titles unless `titles` is off), so the writer picks moments
+    that will later verify."""
+    if titles:
+        ev = verify.gather(topic)
+        if angle and angle.lower() not in topic.lower():
+            ev += verify.gather(f"{topic} {angle}"[:120])
+    else:
+        ev = verify.gather(topic, titles=False)
+        if angle and angle.lower() not in topic.lower():
+            ev += verify.gather(angle[:120], titles=False)
     seen: set[str] = set()
     items = []
     for e in ev:
@@ -132,10 +177,11 @@ def sources_for(topic: str, angle: str, n: int) -> str:
             continue
         seen.add(k)
         meta = " | ".join(x for x in (e.source, e.date) if x)
-        items.append(f"- [{e.kind}] {e.title[:160]}" + (f" ({meta})" if meta else ""))
+        cap = 700 if e.kind == "article" else 160
+        items.append(f"- [{e.kind}] {e.title[:cap]}" + (f" ({meta})" if meta else ""))
     if not items:
         return ""
-    return SOURCES_NOTE.format(n=n, items="\n".join(items[:30]))
+    return SOURCES_NOTE.format(n=n, items="\n".join(items[:40]))
 
 
 def write_script(topic: str, angle: str, cfg: Config, avoid: list[str] | None = None) -> Script:
@@ -143,9 +189,21 @@ def write_script(topic: str, angle: str, cfg: Config, avoid: list[str] | None = 
     if avoid:
         note = "Do NOT use these (they failed a fact-check): " + "; ".join(avoid[:30])
     prompt = _PROMPTS.get(cfg.top10.style, SCRIPT_PROMPT)
-    sources = sources_for(topic, angle, cfg.top10.items) if cfg.verify.enabled else ""
+    story = cfg.top10.style == "explainer"
+    sources = ""
+    if cfg.verify.enabled or story:
+        sources = sources_for(topic, angle, cfg.top10.items, titles=not story)
+    if story and not sources:
+        raise RuntimeError(f"no sources found to write {topic!r} from")
     raw = trends._llm(
-        prompt.format(n=cfg.top10.items, topic=topic, angle=angle, avoid=note, sources=sources),
+        prompt.format(
+            n=cfg.top10.items,
+            topic=topic,
+            angle=angle,
+            avoid=note,
+            sources=sources,
+            rules=slop.RULES,
+        ),
         cfg,
     )
     m = re.search(r"\{.*\}", raw, re.S)
@@ -176,13 +234,23 @@ def write_script(topic: str, angle: str, cfg: Config, avoid: list[str] | None = 
 def fact_check(script: Script, cfg: Config) -> list[verify.Check]:
     """Check every entry's narration (and the intro, if any) against real-world evidence;
     sets Entry.verdict. Returns one Check per entry, then the intro's Check last."""
+    story = cfg.top10.style == "explainer"
+    # an explainer's "query" is a photo search; its facts are looked up by what the line says
     claims = [
-        (f"{e.name}: {e.line}", e.query or f"{script.topic} {e.name}") for e in script.entries
+        (f"{e.name}: {e.line}", f"{script.topic} {e.name}" if story else e.query or e.name)
+        for e in script.entries
     ]
     if script.intro:
         claims.append((f"{script.title}: {script.intro}", script.topic))
-    checks = verify.check_claims(claims, cfg)
+    checks = (
+        verify.check_claims(claims, cfg, titles=False)
+        if story
+        else verify.check_claims(claims, cfg)
+    )
     for e, c in zip(script.entries, checks, strict=False):
+        found = slop.filler(e.line)
+        if found:  # hype instead of information: never spoken, whatever the evidence says
+            c.verdict, c.note = "unsupported", f"filler: {', '.join(found)}"
         e.verdict = c.verdict
         log.info(
             "fact-check #%d %s -> %s (%.2f) %s", e.rank, e.name, c.verdict, c.confidence, c.note
@@ -190,10 +258,10 @@ def fact_check(script: Script, cfg: Config) -> list[verify.Check]:
     if script.intro:
         c = checks[-1]
         log.info("fact-check intro -> %s (%.2f) %s", c.verdict, c.confidence, c.note)
-        if not verify.passes(c, cfg):
+        if not verify.passes(c, cfg) or slop.filler(script.intro):
             log.warning("intro rejected, dropping it: %r / %r", script.title, script.intro)
             script.intro = ""
-            if cfg.top10.style != "ranking":  # ranking's title is the banner, not the hook
+            if cfg.top10.style not in ("ranking", "explainer"):  # their title is not the hook
                 script.title = f"Top {len(script.entries)} {script.topic}".strip()
     return checks
 
@@ -353,14 +421,18 @@ def _finish(parts: list[Path], title: str, cfg: Config, vdir: Path) -> Path:
 
 def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
     """Listicle style: one photo per item with a slow zoom, one word on screen at a time, the
-    narrator reads straight through with no gaps, no badges/SFX/clip audio - just voice + bed."""
+    narrator reads straight through with no gaps, no badges/SFX/clip audio - just voice + bed.
+    Explainer style is the same build with the story's title over the opening, photos from
+    Wikimedia Commons only (never another channel's thumbnail) and the push direction
+    alternating beat to beat."""
     t = cfg.top10
+    story = t.style == "explainer"
     vdir.mkdir(parents=True, exist_ok=True)
     (vdir / "script.json").write_text(json.dumps(asdict(script), indent=2))
 
     pics: dict[int, Path] = {}
     for e in script.entries:
-        p = images.fetch(e.query, e.name, vdir / "images")
+        p = images.fetch(e.query, e.name, vdir / "images", thumbs=not story)
         if p is None:
             log.warning("no image for #%d %s; dropping it", e.rank, e.name)
         else:
@@ -368,12 +440,13 @@ def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
     script.entries = [e for e in script.entries if id(e) in pics]
     if len(script.entries) < max(3, cfg.verify.min_entries if cfg.verify.enabled else 3):
         raise RuntimeError(f"only {len(script.entries)} entries with images for {script.title!r}")
-    _renumber(script, cfg, len(script.entries))
+    if not story:
+        _renumber(script, cfg, len(script.entries))
     (vdir / "script.json").write_text(json.dumps(asdict(script), indent=2))
 
     segments: list[tuple[str, Entry]] = []
-    if script.intro:
-        segments.append((script.intro, script.entries[0]))
+    if script.intro or story:  # a story always opens on its title, said aloud if nothing else
+        segments.append((script.intro or script.title, script.entries[0]))
     segments += [(e.line, e) for e in script.entries]
     parts: list[Path] = []
     for i, (text, entry) in enumerate(segments):
@@ -388,8 +461,11 @@ def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
         if i == len(segments) - 1:
             dur += t.listicle_outro_s  # the last photo holds a beat instead of cutting off
         # the intro shares the first item's photo: zoom out on the intro, in on the item
-        zoom_in = not (script.intro and i == 0)
-        render.render_still(pics[id(entry)], dur, voice, words, cfg, seg, zoom_in=zoom_in)
+        zoom_in = i % 2 == 1 if story else not (script.intro and i == 0)
+        title = script.title if story and i == 0 else ""
+        render.render_still(
+            pics[id(entry)], dur, voice, words, cfg, seg, zoom_in=zoom_in, title=title, fill=story
+        )
         parts.append(seg)
     return _finish(parts, script.title, cfg, vdir)
 
@@ -410,7 +486,7 @@ def _clip_words(src: Path, cuts: list[tuple[float, float]], cfg: Config) -> list
 
 
 def build(script: Script, cfg: Config, vdir: Path) -> Path:
-    if cfg.top10.style == "listicle":
+    if cfg.top10.style in ("listicle", "explainer"):
         return build_listicle(script, cfg, vdir)
     ranking = cfg.top10.style == "ranking"
     t = cfg.top10
@@ -494,6 +570,19 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
     return _finish(parts, script.title, cfg, vdir)
 
 
+def open_idea(cfg: Config, used: list[str]) -> tuple[str, str] | None:
+    """(question, Wikipedia article) for an explainer on any subject, or None when the writer is
+    unavailable."""
+    try:
+        raw = trends._llm(IDEA_PROMPT.format(used="; ".join(used[-40:]) or "(none yet)"), cfg)
+        j = json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
+        topic, wiki = str(j["topic"]).strip()[:100], str(j.get("wiki", "")).strip()[:100]
+    except Exception as e:
+        log.warning("no open explainer idea (%s)", e)
+        return None
+    return (topic, wiki) if topic and trends.rights_ok(topic, "", cfg) else None
+
+
 def pick_topic(cfg: Config, used: list[str], state=None) -> tuple[str, str] | None:
     """(topic, angle) for the next Top-10: from config.top10.topics, else from what's trending.
     With `state`, the pick takes its turn in the topic mix (trends.pillars) and is recorded."""
@@ -502,6 +591,11 @@ def pick_topic(cfg: Config, used: list[str], state=None) -> tuple[str, str] | No
         return fixed[0], ""
     if cfg.top10.topics:
         return None
+    t = cfg.top10
+    if t.style == "explainer" and t.open_topic_every and (len(used) + 1) % t.open_topic_every == 0:
+        idea = open_idea(cfg, used)
+        if idea:
+            return idea
     picked = trends.pick_topics(
         trends.discover(cfg), cfg, used, pillars_used=state.used_pillars() if state else None
     )
@@ -513,9 +607,12 @@ def pick_topic(cfg: Config, used: list[str], state=None) -> tuple[str, str] | No
     return tp.name, tp.angle or tp.headline
 
 
-def narration_text(script: Script) -> str:
+def narration_text(script: Script, cfg: Config | None = None) -> str:
     """Everything the narrator is meant to say, for the QA speech check."""
-    return " ".join([script.intro, *(e.line for e in script.entries)]).strip()
+    intro = script.intro
+    if not intro and cfg is not None and cfg.top10.style == "explainer":
+        intro = script.title
+    return " ".join([intro, *(e.line for e in script.entries)]).strip()
 
 
 def make(topic: str, angle: str, cfg: Config, vdir: Path) -> tuple[Path, Script]:

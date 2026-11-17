@@ -219,6 +219,20 @@ def _whisper(model: str, compute: str):
     return WhisperModel(model, device="cpu", compute_type=compute)
 
 
+def _lang_file(cache: Path) -> Path:
+    return cache.with_suffix(".lang.json")
+
+
+def language(cache: Path) -> tuple[str, float]:
+    """(whisper language code, probability) of the transcript cached at `cache`; ("", 0.0) when
+    it was never detected."""
+    try:
+        j = json.loads(_lang_file(cache).read_text())
+        return str(j["language"]), float(j["prob"])
+    except (OSError, ValueError, KeyError):
+        return "", 0.0
+
+
 def transcribe(video: Path, cfg: Config, cache: Path) -> list[Segment]:
     if cache.exists():
         raw = json.loads(cache.read_text())
@@ -227,8 +241,11 @@ def transcribe(video: Path, cfg: Config, cache: Path) -> list[Segment]:
         ]
 
     log.info("transcribing %s with whisper-%s", video.name, cfg.whisper_model)
-    segs, _ = _whisper(cfg.whisper_model, cfg.whisper_compute).transcribe(
+    segs, info = _whisper(cfg.whisper_model, cfg.whisper_compute).transcribe(
         str(video), word_timestamps=True, vad_filter=True
+    )
+    _lang_file(cache).write_text(
+        json.dumps({"language": info.language, "prob": float(info.language_probability)})
     )
     result: list[Segment] = []
     for s in segs:
