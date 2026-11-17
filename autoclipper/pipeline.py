@@ -148,6 +148,8 @@ def check_hooks(moments, segments, cfg: Config, report: Path) -> None:
             if not verify.passes(tchk, cfg, strict=True):
                 log.warning("take rejected (%s %s): %r", tchk.verdict, tchk.note, m.take)
                 m.take = ""
+            else:
+                log.info("take supported: %r", m.take)
     report.write_text(json.dumps(rows, indent=2))
 
 

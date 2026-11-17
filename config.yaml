@@ -118,7 +118,7 @@ trends:
     - name: gaming news
       queries: ["gaming news today", "video game news this week"]
       angle: "the biggest video game story right now that is not about GTA, and what it means for players"
-      keywords: &gaming ["game", "games", "gaming", "gameplay", "nintendo", "switch 2", "zelda", "mario", "pokemon", "playstation", "ps5", "ps6", "xbox", "steam", "pc"]
+      keywords: &gaming ["video game", "video games", "gaming", "gameplay", "nintendo", "switch 2", "zelda", "mario", "pokemon", "playstation", "ps5", "ps6", "xbox", "steam deck"]
     - name: consoles and tech
       queries: ["Switch 2 news", "PS5 Xbox news", "Digital Foundry analysis"]
       angle: "one console, hardware or performance story players are talking about"
