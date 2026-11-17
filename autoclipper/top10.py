@@ -120,6 +120,9 @@ fewer. No predictions, no rumours stated as fact.
 Every beat is shown over ONE real photograph from Wikimedia Commons, so "query" must name a
 real-world subject a photo exists of (a place, a person, an object, a building, an animal), 2-4
 words, proper nouns first - never a game screenshot, a logo or an abstract idea.
+Use one word for one thing from the title to the last beat (if the title says "railway", never
+say "railroad"), and the spelling of the place the story is set in. Open the intro on the single
+most surprising fact. Each beat's photo must show what that beat talks about.
 Narration is plain spoken words only: no emojis, hashtags, stage directions or numbering.
 Return ONLY JSON:
 {{"title": "<the question or claim, max 9 words, Title Case>",
