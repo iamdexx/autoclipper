@@ -6,7 +6,21 @@ import re
 from dataclasses import asdict
 from pathlib import Path
 
-from . import analytics, ingest, metadata, qa, queue, rank, render, top10, trends, verify
+from . import (
+    analytics,
+    ingest,
+    metadata,
+    qa,
+    queue,
+    rank,
+    reframe,
+    render,
+    review,
+    slop,
+    top10,
+    trends,
+    verify,
+)
 from .config import Config, Creator
 from .state import State
 
@@ -59,7 +73,17 @@ def process_video(
     state.mark_video(meta.id, "downloading", title=meta.title, creator=creator.name)
     src = ingest.download(meta.url, vdir)
     segments = ingest.transcribe(src, cfg, vdir / "transcript.json")
-    moments = rank.rank(segments, cfg, creator.name)
+    why = source_problem(src, meta, segments, cfg, vdir / "transcript.json")
+    if why:
+        log.info("skipping %s (%s): %s", meta.id, meta.title, why)
+        state.mark_video(meta.id, "skipped_source", title=meta.title, creator=creator.name, why=why)
+        return []
+    try:
+        moments = rank.rank(segments, cfg, creator.name)
+    except rank.Unavailable as e:
+        log.warning("%s: %s; nothing cut, the video is retried on a later run", meta.id, e)
+        state.forget_video(meta.id)
+        return []
     if cfg.verify.enabled:
         check_hooks(moments, segments, cfg, vdir / "factcheck.json")
     (vdir / "moments.json").write_text(json.dumps([asdict(m) for m in moments], indent=2))
@@ -115,6 +139,28 @@ def process_video(
     return clips
 
 
+def source_problem(src: Path, meta, segments, cfg: Config, transcript: Path) -> str:
+    """Why this video is not worth cutting from ('' = it is): wrong language, nobody on camera,
+    or the source review (review.py) found a slideshow, a synthetic voice, burned-in captions or
+    another channel's overlays. A review that could not be run lets the source through; every
+    finished clip still has to pass its own review."""
+    t = cfg.trends
+    if t.languages:
+        lang, prob = ingest.language(transcript)
+        if lang and (lang not in t.languages or prob < t.min_language_prob):
+            return f"spoken language {lang} ({prob:.0%}), want {'/'.join(t.languages)}"
+    if t.min_face_share > 0:
+        share = reframe.face_share(src, meta.duration or 0)
+        if share is not None and share < t.min_face_share:
+            return f"a face in {share:.0%} of frames (need {t.min_face_share:.0%})"
+    if cfg.review.enabled:
+        said = " ".join(s.text for s in segments)
+        v = review.source(src, meta.title, meta.uploader or "", said, cfg)
+        if v.ok is False:
+            return f"source review: {', '.join(v.problems)} ({v.note})"
+    return ""
+
+
 def check_hooks(moments, segments, cfg: Config, report: Path) -> None:
     """The on-screen hook and the narrator's line must be faithful to the clip. Anything that
     fails verify.passes() (unsupported; unverifiable too in strict mode) is replaced: narration by
@@ -122,6 +168,7 @@ def check_hooks(moments, segments, cfg: Config, report: Path) -> None:
     on-screen title by a line taken straight from the transcript. The take is checked even with
     verify.check_hooks off, and is dropped unless it is positively supported."""
     rows = []
+    full = " ".join(s.text for s in segments)
     for m in moments:
         text = " ".join(s.text for s in segments if s.end > m.start and s.start < m.end)
         claim = m.hook if not m.narration else f"{m.hook}. {m.narration}"
@@ -141,9 +188,9 @@ def check_hooks(moments, segments, cfg: Config, report: Path) -> None:
                 fixed,
             )
             m.hook = safe_hook or m.hook
-            m.narration = fixed
+            m.narration = fixed if slop.clean(fixed) else ""
         if m.take:
-            tchk = verify.check_take(m.take, text, cfg)
+            tchk = verify.check_take(m.take, text, cfg, full)
             rows.append({**verify.dump([tchk])[0], "kind": "take"})
             if not verify.passes(tchk, cfg, strict=True):
                 log.warning("take rejected (%s %s): %r", tchk.verdict, tchk.note, m.take)
@@ -230,7 +277,7 @@ def make_top10(
         log.exception("top10 %r failed: %s", topic, e)
         state.mark_topic("top10", topic, status="error", error=str(e))
         return None
-    if not qa.gate(out, cfg, top10.narration_text(script), kind="top10"):
+    if not qa.gate(out, cfg, top10.narration_text(script, cfg), kind="top10"):
         state.mark_topic("top10", topic, status="qa_failed", video=out.name, title=script.title)
         return None
     state.mark_topic("top10", topic, status="done", video=out.name, title=script.title)

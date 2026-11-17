@@ -6,6 +6,7 @@ based on which API key is present in the environment.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -13,6 +14,7 @@ import re
 import time
 from dataclasses import dataclass
 
+from . import slop
 from .config import Config
 from .ingest import Segment
 
@@ -104,7 +106,6 @@ def rank_heuristic(cands, cfg: Config) -> list[Moment]:
             _hook_from_text(t),
             "heuristic: energy/keywords",
             heuristic_score(t, e - s),
-            narration=f"{_hook_from_text(t)}.",
         )
         for s, e, t in cands
     ]
@@ -123,21 +124,35 @@ def _dedupe(moments: list[Moment], n: int) -> list[Moment]:
 
 # ---------- LLM ----------
 
-PROMPT = """You are a professional short-form clipper for TikTok / Reels / Shorts.
-Below is a timestamped transcript of a livestream by {creator}. Pick the {n} moments with the
-highest viral potential: the action or the line that matters starts within the first 2 seconds
-(no run-up, no context), emotional spikes, hot takes, drama, laughter, money/numbers,
-controversy, or a clear story with payoff. Each clip must be between {min_len} and {max_len}
-seconds, must start right where it gets good (a natural sentence beginning) and end on a payoff.
+PROMPT = """You are the editor of a short-form video channel (TikTok / Reels / Shorts) that
+viewers trust because it never wastes their time. Below is a timestamped transcript of a video
+by {creator}. Pick up to {n} moments worth posting. A moment is worth posting only if a stranger
+learns one specific, surprising thing from it or hears a strong opinion argued with a reason:
+a new rule, a number, a quote, a comparison, a reveal. Skip intros, sponsor reads, "like and
+subscribe", recaps of things everyone knows, and anything that needs the rest of the video to
+make sense. If fewer than {n} moments clear that bar, return fewer; an empty array is fine.
+
+Each clip must be between {min_len} and {max_len} seconds. It must start on the first word of a
+sentence, with the point arriving in the first 3 seconds, and end on the last word of a
+sentence that completes the thought - never mid-explanation, never on a question that the next
+line answers.
+
+{rules}
+
 Return ONLY a JSON array, no prose, each item:
-{{"start": <seconds float>, "end": <seconds float>, "hook": "<punchy 3-6 word on-screen title>",
-  "narration": "<ONE short punchy sentence (max 9 words) an excited narrator says before the clip so viewers stay, e.g. 'Wait for what he says about his boss.' Plain spoken words only: no stage directions, hashtags or emojis.>",
-  "take": "<the channel's own commentary, said by the narrator right after the clip: 2 sentences, 18-28 words, telling the viewer what this moment means or why it matters. Use only what is said in the clip: no new facts, names, numbers, dates or predictions, and nothing unconfirmed stated as fact. Plain spoken words only.>",
-  "reason": "<one sentence>", "score": <0-10>}}
+{{"start": <seconds float>, "end": <seconds float>,
+  "hook": "<on-screen title, 4-8 words: the specific claim made in the clip, e.g. 'GTA 6 Locks Supercars Behind The Story'. Not a tease.>",
+  "narration": "<ONE sentence, max 12 words, said by our host before the clip: the clip's actual claim plus who says it, e.g. 'Rockstar says some parked cars need a key cloner.' Must not repeat the clip's first sentence. Plain spoken words only.>",
+  "take": "<our host's line after the clip: ONE or two sentences, 14-26 words, giving context the clip itself leaves out, taken from elsewhere in THIS transcript (a caveat, a number, what is still unconfirmed, how it compares to something said earlier or later). It must not restate the clip. If the rest of the transcript adds nothing, return an empty string.>",
+  "reason": "<one sentence: what the viewer learns>", "score": <0-10>}}
 
 TRANSCRIPT:
 {transcript}
 """
+
+
+class Unavailable(RuntimeError):
+    """The model that picks moments could not be reached; nothing was picked."""
 
 
 def _transcript_text(segments: list[Segment], max_chars: int = 180_000) -> str:
@@ -180,13 +195,18 @@ GEMINI_MODELS = [
 ]
 
 
-def _call_gemini(prompt: str, model: str | None) -> str:
+def _call_gemini(prompt: str, model: str | None, images: list[bytes] | None = None) -> str:
+    """`images`: JPEGs sent along with the prompt, in order."""
     import requests
 
     key = _gemini_key()
     models = [model] if model else GEMINI_MODELS
+    pics = [
+        {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(b).decode()}}
+        for b in images or []
+    ]
     body = {
-        "contents": [{"parts": [{"text": prompt}]}],
+        "contents": [{"parts": [*pics, {"text": prompt}]}],
         "generationConfig": {"temperature": 0.4, "responseMimeType": "application/json"},
     }
     last: Exception | None = None
@@ -237,13 +257,21 @@ def _parse_json_array(text: str) -> list[dict]:
     return json.loads(m.group(0))
 
 
+_SENTENCE_END = re.compile(r"[.!?][\"')\]]*$")
+
+
 def _snap(t: float, segments: list[Segment], to_end: bool) -> float:
-    """Snap a timestamp to the nearest segment boundary so clips start/end on sentences."""
+    """Snap a timestamp to a nearby segment boundary so clips start/end on sentences. Whisper
+    segments break mid-sentence too, so a boundary where a sentence really ends (punctuation)
+    within 4s wins over a nearer one that does not."""
     best = t
     bd = 1e9
-    for s in segments:
+    for i, s in enumerate(segments):
         b = s.end if to_end else s.start
         d = abs(b - t)
+        closes = s if to_end else (segments[i - 1] if i else None)
+        if closes is None or _SENTENCE_END.search(closes.text.strip()):
+            d -= 4  # a real sentence boundary beats a closer mid-sentence one
         if d < bd:
             bd, best = d, b
     return best if bd <= 4 else t
@@ -253,6 +281,7 @@ def rank_llm(segments: list[Segment], cfg: Config, creator: str, provider: str) 
     prompt = PROMPT.format(
         creator=creator,
         n=cfg.clips.count,
+        rules=slop.RULES,
         min_len=int(cfg.clips.min_len_s),
         max_len=int(cfg.clips.max_len_s),
         transcript=_transcript_text(segments),
@@ -268,6 +297,11 @@ def rank_llm(segments: list[Segment], cfg: Config, creator: str, provider: str) 
         if dur < cfg.clips.min_len_s * 0.7 or dur > cfg.clips.max_len_s * 1.3:
             continue
         end = min(end, start + cfg.clips.max_len_s)
+        narration = str(it.get("narration", "")).strip()[:240]
+        take = str(it.get("take", "")).strip()[:320] if cfg.narration.take else ""
+        for what, line in (("narration", narration), ("take", take)):
+            if slop.filler(line):
+                log.info("%s dropped (filler: %s): %r", what, ", ".join(slop.filler(line)), line)
         moments.append(
             Moment(
                 start,
@@ -275,8 +309,8 @@ def rank_llm(segments: list[Segment], cfg: Config, creator: str, provider: str) 
                 str(it.get("hook", ""))[:80],
                 str(it.get("reason", "")),
                 float(it.get("score", 5)),
-                narration=str(it.get("narration", ""))[:240],
-                take=str(it.get("take", "")).strip()[:320] if cfg.narration.take else "",
+                narration=narration if slop.clean(narration) else "",
+                take=take if slop.clean(take) else "",
             )
         )
     return _dedupe(sorted(moments, key=lambda m: -m.score), cfg.clips.count)
@@ -293,7 +327,10 @@ def rank(segments: list[Segment], cfg: Config, creator: str) -> list[Moment]:
             if picked:
                 log.info("ranked %d moments with %s", len(picked), provider)
                 return picked
-            log.warning("%s returned no usable moments; falling back to heuristic", provider)
+            log.info("%s found no moment worth posting", provider)
+            return []
         except Exception as e:
+            if not cfg.clips.heuristic_fallback:
+                raise Unavailable(f"{provider} ranking failed: {e}") from e
             log.warning("%s ranking failed (%s); falling back to heuristic", provider, e)
     return rank_heuristic(cands, cfg)

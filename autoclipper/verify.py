@@ -115,6 +115,36 @@ def wikipedia(query: str, n: int = 3) -> list[Evidence]:
     ]
 
 
+def wiki_extract(query: str, chars: int = 9000) -> list[Evidence]:
+    """The opening of the best-matching Wikipedia article, as sentences: something a claim can
+    actually be checked against, unlike a one-line search snippet."""
+    r = requests.get(
+        "https://en.wikipedia.org/w/api.php",
+        params={
+            "action": "query",
+            "generator": "search",
+            "gsrsearch": query,
+            "gsrlimit": 1,
+            "prop": "extracts",
+            "explaintext": 1,
+            "exlimit": 1,
+            "format": "json",
+            "utf8": 1,
+        },
+        headers=_UA,
+        timeout=20,
+    )
+    r.raise_for_status()
+    out = []
+    for p in (r.json().get("query") or {}).get("pages", {}).values():
+        url = "https://en.wikipedia.org/wiki/" + urllib.parse.quote(p["title"].replace(" ", "_"))
+        for para in (p.get("extract") or "")[:chars].split("\n"):
+            para = para.strip()
+            if len(para) > 60 and not para.startswith("="):
+                out.append(Evidence("article", f"{p['title']}: {para}", "wikipedia", url=url))
+    return out
+
+
 def youtube(query: str, n: int = 5) -> list[Evidence]:
     return [
         Evidence("youtube", c.title, source=c.channel, url=c.url)
@@ -123,8 +153,9 @@ def youtube(query: str, n: int = 5) -> list[Evidence]:
     ]
 
 
-def gather(query: str) -> list[Evidence]:
-    """All sources in parallel; a failing source contributes nothing."""
+def gather(query: str, titles: bool = True) -> list[Evidence]:
+    """All sources in parallel; a failing source contributes nothing. `titles=False` leaves out
+    YouTube video titles: they show that a video exists, not that what it says is true."""
 
     def _run(fn):
         try:
@@ -135,7 +166,10 @@ def gather(query: str) -> list[Evidence]:
 
     ev: list[Evidence] = []
     with ThreadPoolExecutor(max_workers=3) as ex:
-        for res in ex.map(_run, (google_news, wikipedia, youtube)):
+        for res in ex.map(
+            _run,
+            (google_news, wikipedia, youtube) if titles else (google_news, wikipedia, wiki_extract),
+        ):
             ev += res
     return ev
 
@@ -167,18 +201,21 @@ def _fmt(i: int, claim: str, ev: list[Evidence]) -> str:
     lines = [f"CLAIM {i}: {claim}"]
     if not ev:
         lines.append("  EVIDENCE: (none found)")
-    for e in ev[:14]:
+    for e in ev[:24]:
         meta = " | ".join(x for x in (e.source, e.date) if x)
-        lines.append(f"  [{e.kind}] {e.title[:160]}" + (f" ({meta})" if meta else ""))
+        cap = 700 if e.kind == "article" else 160
+        lines.append(f"  [{e.kind}] {e.title[:cap]}" + (f" ({meta})" if meta else ""))
     return "\n".join(lines)
 
 
-def check_claims(claims: list[tuple[str, str]], cfg: Config) -> list[Check]:
-    """claims = [(claim_text, search_query)] -> one Check per claim (same order)."""
+def check_claims(claims: list[tuple[str, str]], cfg: Config, titles: bool = True) -> list[Check]:
+    """claims = [(claim_text, search_query)] -> one Check per claim (same order). `titles`: see
+    gather()."""
     if not claims:
         return []
     with ThreadPoolExecutor(max_workers=4) as ex:
-        evidence = list(ex.map(gather, [q for _, q in claims]))
+        find = gather if titles else (lambda q: gather(q, titles=False))
+        evidence = list(ex.map(find, [q for _, q in claims]))
     checks = [Check(claim=c, evidence=ev) for (c, _), ev in zip(claims, evidence, strict=True)]
     items = "\n\n".join(_fmt(i, c.claim, c.evidence) for i, c in enumerate(checks))
     try:
@@ -220,33 +257,42 @@ TRANSCRIPT: {transcript}
 """
 
 
-TAKE_PROMPT = """After this clip plays, a narrator adds the channel's own TAKE on it. Check the take
-against the clip's TRANSCRIPT. Opinion and explaining why the moment matters are fine. It is
-unsupported if it states as fact anything the transcript does not contain (invented quotes, names,
-numbers, dates, outcomes), presents a rumour or leak as confirmed, or promises the viewer money
-or results.
-Return ONLY JSON: {{"verdict": "supported|unsupported", "confidence": <0-1>,
+TAKE_PROMPT = """After this clip plays, our host adds one TAKE. Check it two ways.
+1. Faithful: everything it states as fact must be said somewhere in the FULL VIDEO transcript
+   (invented quotes, names, numbers, dates or outcomes, a rumour or leak presented as confirmed,
+   or a promise of money or results make it unsupported). Opinion is fine.
+2. Adds something: it must tell the viewer a specific thing the CLIP itself does not say (a
+   caveat, a number, what is still unknown, a comparison). A take that only restates or praises
+   the clip adds nothing.
+Return ONLY JSON: {{"verdict": "supported|unsupported", "adds": true|false, "confidence": <0-1>,
   "note": "<one sentence>"}}
 
 TAKE: {take}
-TRANSCRIPT: {transcript}
+CLIP: {transcript}
+FULL VIDEO: {full}
 """
 
 
-def check_take(take: str, transcript: str, cfg: Config) -> Check:
-    """The narrator's commentary against the clip it follows. A check that could not run stays
-    'unverifiable': commentary is only spoken when it was positively supported."""
+def check_take(take: str, transcript: str, cfg: Config, full: str = "") -> Check:
+    """The host's line after a clip, against the clip and the video it was cut from (`full`). It
+    is only spoken when it was positively found faithful and to add something the clip lacks: a
+    check that could not run stays 'unverifiable', a restatement comes back 'unsupported'."""
     chk = Check(claim=take)
     if not transcript.strip():
         chk.note = "no transcript for this window"
         return chk
     try:
-        raw = trends._llm(TAKE_PROMPT.format(take=take, transcript=transcript[:4000]), cfg)
-        j = json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
+        prompt = TAKE_PROMPT.format(
+            take=take, transcript=transcript[:4000], full=(full or transcript)[:60_000]
+        )
+        j = json.loads(re.search(r"\{.*\}", trends._llm(prompt, cfg), re.S).group(0))
         v = str(j.get("verdict", "")).lower()
         chk.verdict = v if v in VERDICTS else "unverifiable"
         chk.confidence = float(j.get("confidence", 0) or 0)
         chk.note = str(j.get("note", ""))[:300]
+        if chk.verdict == "supported" and j.get("adds") is not True:
+            chk.verdict = "unsupported"
+            chk.note = f"adds nothing the clip does not say. {chk.note}"[:300]
     except Exception as e:
         log.warning("take check failed (%s)", e)
         chk.note = f"check failed: {e}"[:300]

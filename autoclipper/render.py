@@ -358,24 +358,42 @@ def render_still(
     cfg: Config,
     out: Path,
     zoom_in: bool = True,
+    title: str = "",
+    fill: bool = False,
 ) -> Path:
     """One listicle item: a still photo with a slow Ken Burns zoom (in or out) over a blurred
-    fill, captions in the global style, narration as the only audio."""
+    fill, captions in the global style, narration as the only audio. `fill`: the photo covers
+    the whole frame instead and the camera travels across it (left to right when `zoom_in`,
+    else right to left) while pushing in - a wide photo becomes a moving shot."""
     out.parent.mkdir(parents=True, exist_ok=True)
     ass_path = out.with_suffix(".ass")
-    ass_path.write_text(build_ass(words, "", dur, cfg, badge=""))
+    ass_path.write_text(build_ass(words, title, dur, cfg, badge=""))
     frames = max(1, round(dur * FPS))
-    z = f"1+0.12*on/{frames}" if zoom_in else f"1.12-0.12*on/{frames}"
-    # the composite is built at 2x and zoompan downsamples it, which keeps the slow zoom smooth
-    vf = (
-        f"[0:v]split=2[b0][f0];"
-        f"[b0]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=24:6[bg];"
-        f"[f0]scale={W}:-2:force_original_aspect_ratio=decrease[fg];"
-        f"[bg][fg]overlay=(W-w)/2:(H-h)/2,scale={2 * W}:{2 * H},"
-        f"zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={W}x{H}"
-        f":fps={FPS},ass={ass_path.as_posix()}[v]"
-    )
-    inputs = ["-i", str(image)]
+    if fill:
+        # cover the frame with 15% to spare, then slide a growing crop over at most 60% of the
+        # spare width so a panorama does not race past
+        p = f"n/{frames}"
+        travel = f"min(iw-ow,{0.6 * W:.0f})"
+        x = f"(iw-ow)/2+{travel}*({p}-0.5)" if zoom_in else f"(iw-ow)/2-{travel}*({p}-0.5)"
+        vf = (
+            f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,"
+            f"scale=iw*1.15:ih*1.15:flags=lanczos,fps={FPS},"
+            f"crop=w='{W}*(1.12-0.12*{p})':h='{H}*(1.12-0.12*{p})':x='{x}':y='(ih-oh)/2',"
+            f"scale={W}:{H}:flags=lanczos,setsar=1,ass={ass_path.as_posix()}[v]"
+        )
+        inputs = ["-loop", "1", "-framerate", str(FPS), "-t", f"{dur:.3f}", "-i", str(image)]
+    else:
+        z = f"1+0.12*on/{frames}" if zoom_in else f"1.12-0.12*on/{frames}"
+        # the composite is built at 2x and zoompan downsamples it, keeping the slow zoom smooth
+        vf = (
+            f"[0:v]split=2[b0][f0];"
+            f"[b0]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=24:6[bg];"
+            f"[f0]scale={W}:-2:force_original_aspect_ratio=decrease[fg];"
+            f"[bg][fg]overlay=(W-w)/2:(H-h)/2,scale={2 * W}:{2 * H},"
+            f"zoompan=z='{z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={W}x{H}"
+            f":fps={FPS},ass={ass_path.as_posix()}[v]"
+        )
+        inputs = ["-i", str(image)]
     if voice:
         inputs += ["-i", str(voice)]
         vf += f";[1:a]{NORM},apad=whole_dur={dur:.3f},atrim=0:{dur:.3f}[a]"

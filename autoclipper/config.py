@@ -24,6 +24,9 @@ class ClipRules:
     max_len_s: float = 60
     target_len_s: float = 40
     tail_s: float = 1.0  # footage keeps rolling this long after the last line, audio fading out
+    # When the LLM that picks moments is unavailable: false = make nothing and retry the video on
+    # a later run; true = cut the loudest-looking windows by keyword (no hook writer, no editor).
+    heuristic_fallback: bool = False
 
 
 @dataclass
@@ -139,6 +142,12 @@ class Trends:
     # so the channel covers the whole range instead of whatever has the most views today.
     pillars: list[Pillar] = field(default_factory=list)
     pillar_window: int = 20  # how many recent topics max_share is measured over
+    # Source quality. Spoken language (whisper's code) a source must be in; empty = any.
+    languages: list[str] = field(default_factory=list)
+    min_language_prob: float = 0.6  # a less certain language guess counts as "not that language"
+    # Share of sampled frames that must show a face: a person on camera, not a text-to-speech
+    # voice over screenshots. 0 = off.
+    min_face_share: float = 0.0
 
 
 @dataclass
@@ -177,6 +186,17 @@ class QA:
 
 
 @dataclass
+class Review:
+    """Editor's pass on every finished video (see review.py): a vision model looks at frames and
+    reads what is said, and answers a checklist a viewer would care about. Videos wait in the
+    queue until they pass; one that fails is deleted."""
+
+    enabled: bool = False
+    frames: int = 8
+    max_attempts: int = 6  # runs a video may wait for a review that could not be run
+
+
+@dataclass
 class TopTen:
     enabled: bool = False
     per_run: int = 1  # how many Top-10 videos to make per run
@@ -186,9 +206,14 @@ class TopTen:
     #            captioned one word at a time and its audio left alone)
     # countdown = "Top 10 ...": big rank badge per entry, narrator over ducked footage
     # listicle  = "N photos ...": one still per item with a slow zoom, narrator reads through
+    # explainer = "How / Why ...": a scripted story told in beats, one real photo per beat with a
+    #             slow push, every beat a fact checked against news and Wikipedia
     style: str = "ranking"
     narrate: bool = True  # ranking style: full narration (hook + a line per clip)
     items: int = 6
+    # explainer: every Nth one is on any subject the writer proposes (history, science, ...)
+    # instead of this run's trending topic; 0 = never
+    open_topic_every: int = 0
     item_min_s: float = 3.5  # each entry lasts at least this (longer if the narration is)
     listicle_gap_s: float = 0.25  # listicle: pause between items
     outro_s: float = 2.0  # #1's footage plays on (audio back up) this long after the last line
@@ -230,6 +255,7 @@ class Config:
     top10: TopTen = field(default_factory=TopTen)
     verify: Verify = field(default_factory=Verify)
     qa: QA = field(default_factory=QA)
+    review: Review = field(default_factory=Review)
     poll_interval_s: int = 900
     max_videos_per_run: int = 2
     max_video_age_h: float = 72  # creator uploads older than this are never picked up
@@ -248,6 +274,7 @@ class Config:
         top10 = TopTen(**raw.pop("top10", {}))
         verify = Verify(**raw.pop("verify", {}))
         qa = QA(**raw.pop("qa", {}))
+        review = Review(**raw.pop("review", {}))
         workdir = Path(os.path.expanduser(raw.pop("workdir", "data")))
         return cls(
             creators=creators,
@@ -261,5 +288,6 @@ class Config:
             top10=top10,
             verify=verify,
             qa=qa,
+            review=review,
             **raw,
         )

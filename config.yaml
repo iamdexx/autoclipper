@@ -25,6 +25,7 @@ clips:
   max_len_s: 60
   target_len_s: 40
   tail_s: 1.0           # footage rolls on this long after the last line, audio easing out
+  heuristic_fallback: false  # AI editor unavailable: make nothing and retry the video later (true = cut by keywords)
 
 captions:
   style: highlight # every format: 3-word line, the word being spoken turns yellow; `word` = one big white word at a time
@@ -84,6 +85,10 @@ trends:
   # source channels never clipped from (exact name): raw cuts of the publisher's own trailers
   # are the likeliest GTA uploads to be claimed
   blocked_channels: ["Rockstar Games"]
+  # source quality: spoken language must be one of these, and a person has to be on camera
+  # (text-to-speech over screenshots shows a face in almost no frames)
+  languages: ["en"]
+  min_face_share: 0.05
   # The topic mix. Every run takes its topics from the pillars used least recently, one each, so
   # the channel keeps rotating through all of them. max_share caps a pillar's share of the last
   # pillar_window topics. 8 GTA 6 pillars + 3 other-gaming ones = about 73% GTA 6.
@@ -133,10 +138,13 @@ trends:
 top10:
   enabled: true
   per_run: 1
-  style: ranking        # ranking (clips + title banner + filling 1..N list, clip audio) |
+  style: explainer      # explainer (a scripted "How / Why ..." story over real photos, every beat fact-checked) |
+                        # ranking (clips + title banner + filling 1..N list, clip audio) |
+                        # ranking (clips + title banner + filling 1..N list, clip audio) |
                         # countdown (Top 10 with rank badges + narrator) | listicle (photos + narrator)
   narrate: true         # ranking: Liam voices a hook + one line per clip (false = clip audio only)
-  items: 6              # ranking ~6 (20-30s video); countdown 10
+  items: 7              # explainer: beats (~50s); ranking ~6; countdown 10
+  open_topic_every: 3   # explainer: every 3rd one is on any subject (history, science, ...), the rest follow the topic mix
   item_min_s: 3.5
   outro_s: 2.0          # #1's footage plays on (its audio back up) this long after the last line
   listicle_outro_s: 0.8 # listicle: the last photo holds this long after the last word
@@ -147,7 +155,7 @@ top10:
                         # music_generation permission on your key) | synth | off
   music_dir: ""         # folder of your own tracks; used if set / if generation fails
   music_db: -14         # bed level relative to the narration
-  music_prompt: "high-energy instrumental for a viral video game countdown video, driving drums and bass, modern trap-EDM hybrid, 130 bpm, builds tension, no vocals"
+  music_prompt: "curious, cinematic documentary underscore, soft pulse and warm synths, 100 bpm, steady build, no vocals"
   topics: []            # fixed ideas e.g. ["craziest NFL plays this week"]; empty = from trends
 
 verify:                # fact-check gate for everything the narrator says (see README)
@@ -155,9 +163,14 @@ verify:                # fact-check gate for everything the narrator says (see R
   strict: false        # true = also drop entries that couldn't be verified either way (creator hooks too)
   strict_top10: true   # Top-N entries must be positively supported; the script is written from real headlines
   min_confidence: 0.5
-  min_entries: 4       # skip the video if fewer entries survive the check (7 for a Top 10)
+  min_entries: 5       # skip the video if fewer entries survive the check (7 for a Top 10)
   max_rounds: 2        # script rewrites to replace dropped entries
   check_hooks: true    # creator/trend clips: narrator hook must match the transcript
+
+review:                # editor's pass: a vision model watches every finished video against a viewer's checklist
+  enabled: true        # (English, clean captions, no other channel's overlays, says something, not cut off);
+  frames: 8            # nothing is posted until it passes, a fail is deleted, an unreviewable one waits
+  max_attempts: 6
 
 qa:                    # quality gate on every finished video; a failing video is never published
   enabled: true        # report lands in <video>.qa.json either way
