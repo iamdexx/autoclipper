@@ -138,18 +138,25 @@ def review_pending(cfg: Config) -> None:
     (at most review.max_attempts of them). Covers videos queued before the pass existed too."""
     if not cfg.review.enabled:
         return
+    down = 0
     for it in items(cfg):
         if it.reviewed:
             continue
         v = review.video(_dir(cfg) / it.id / it.video, it.kind, cfg)
+        if v.ok is None:  # one timeout is not an outage: ask once more
+            v = review.video(_dir(cfg) / it.id / it.video, it.kind, cfg)
         if v.ok is None:
+            down += 1
             it.review_tries += 1
             if it.review_tries >= cfg.review.max_attempts:
                 log.info("queue: dropping %s (never reviewed)", it.video)
                 remove(cfg, it)
             else:
                 _save(cfg, it)
-            break  # the reviewer is down or out of quota: the rest wait too
+            if down >= 2:
+                break  # two videos in a row could not be reviewed: the reviewer is down
+            continue
+        down = 0
         if v.ok:
             it.reviewed = True
             _save(cfg, it)
