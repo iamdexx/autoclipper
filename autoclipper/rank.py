@@ -210,13 +210,17 @@ def _call_gemini(prompt: str, model: str | None, images: list[bytes] | None = No
         "generationConfig": {"temperature": 0.4, "responseMimeType": "application/json"},
     }
     last: Exception | None = None
+    hung: set[str] = set()  # timed out once: not waited on again in this call
     for attempt in range(4):
         for m in models:
+            if m in hung:
+                continue
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
             try:
                 r = requests.post(url, headers={"x-goog-api-key": key}, json=body, timeout=120)
             except (requests.Timeout, requests.ConnectionError) as e:
                 # a model that hangs under load is as down as one that answers 503
+                hung.add(m)
                 last = RuntimeError(f"gemini {m} {type(e).__name__}: {str(e)[:200]}")
                 log.warning("%s - trying next model", last)
                 continue
@@ -227,6 +231,8 @@ def _call_gemini(prompt: str, model: str | None, images: list[bytes] | None = No
             r.raise_for_status()
             parts = r.json()["candidates"][0]["content"]["parts"]
             return "".join(p.get("text", "") for p in parts)
+        if hung.issuperset(models):
+            break
         time.sleep(5 * (attempt + 1))
     raise last or RuntimeError("gemini unavailable")
 

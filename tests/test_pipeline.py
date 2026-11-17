@@ -1527,7 +1527,10 @@ def test_gemini_moves_to_next_model_when_one_hangs(monkeypatch):
 def test_gemini_gives_up_when_every_model_hangs(monkeypatch):
     import requests
 
+    calls = []
+
     def post(url, **kw):
+        calls.append(url)
         raise requests.ConnectionError("reset")
 
     monkeypatch.setattr(rank, "_gemini_key", lambda: "k")
@@ -1535,3 +1538,29 @@ def test_gemini_gives_up_when_every_model_hangs(monkeypatch):
     monkeypatch.setattr(rank.time, "sleep", lambda s: None)
     with pytest.raises(RuntimeError, match="ConnectionError"):
         rank._call_gemini("p", "gemini-flash-latest")
+    assert len(calls) == 1  # a hung model is not waited on again in the same call
+
+
+def test_gemini_skips_a_hung_model_on_retries(monkeypatch):
+    import requests
+
+    calls = []
+
+    class Busy:
+        status_code = 503
+        text = "overloaded"
+
+    def post(url, **kw):
+        m = url.split("/models/")[1].split(":")[0]
+        calls.append(m)
+        if m == rank.GEMINI_MODELS[0]:
+            raise requests.ReadTimeout("read timed out")
+        return Busy()
+
+    monkeypatch.setattr(rank, "_gemini_key", lambda: "k")
+    monkeypatch.setattr(requests, "post", post)
+    monkeypatch.setattr(rank.time, "sleep", lambda s: None)
+    with pytest.raises(RuntimeError, match="503"):
+        rank._call_gemini("p", None)
+    assert calls.count(rank.GEMINI_MODELS[0]) == 1
+    assert calls.count(rank.GEMINI_MODELS[1]) == 4
