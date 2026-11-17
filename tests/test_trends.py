@@ -208,6 +208,8 @@ def test_config_mix_is_mostly_gta_with_gaming_on_the_side():
         assert not trends.on_focus(title, cfg)
     assert trends.on_focus("Zelda Ocarina of Time Switch 2 lighting review", cfg)
     assert not trends.on_focus("Zelda Ocarina of Time Switch 2 lighting review", cfg, "")
+    for title in ("Insane MrBeast Hunger Games moments", "Taking a hostage in games", "PC stock"):
+        assert not trends.on_focus(title, cfg)
 
 
 def test_next_pillars_rotates_and_respects_max_share(tmp_path):
