@@ -45,7 +45,7 @@ publishing:
   schedule_ahead_h: 12       # a run uploads queued videos as scheduled YouTube posts this far ahead
   queue_max_age_h: 48        # the best-scoring queued video posts first; the rest age out
   queue_max_items: 24
-  cta: "Subscribe to Clipverse HQ for GTA 6 news, details and the best moments, every day."
+  cta: "Subscribe to Clipverse HQ for GTA 6 and gaming news, details and the best moments, every day."
 
 narration:
   provider: auto        # auto = edge (no key) > azure > google > elevenlabs > gemini > openai, next one when a call fails | off
@@ -58,23 +58,34 @@ narration:
   gemini_voice: Puck    # Kore, Charon, Fenrir, Aoede, Leda ...
   duck_db: -14
   max_len_s: 3.5        # the narrator's hook: one line, then the clip; longer is sped up (max 1.3x) or dropped
+  take: true            # after the clip the narrator adds the channel's own fact-checked commentary
+  take_max_s: 9.0       # over the footage rolling on, ducked; longer is sped up (max 1.3x)
 
 # Trend mode: scrape what's blowing up, let the LLM pick topics, find the best source video and
-# clip it like a stream. The channel is about GTA 6: anything whose title doesn't name one of
-# focus_keywords is skipped (trend topics, source videos and the creators' uploads above).
+# clip it like a stream. The channel is GTA 6 first: anything whose title doesn't name one of
+# focus_keywords is skipped (trend topics, source videos and the creators' uploads above), except
+# in the three "other gaming" pillars at the end of the mix, which match their own `keywords`.
 trends:
   enabled: true
-  focus: "GTA 6 (Grand Theft Auto VI)"
+  focus: "GTA 6 (Grand Theft Auto VI) first, plus the biggest other video game news"
   focus_keywords: ["gta 6", "gta vi", "gta", "grand theft auto"]
+  # never clipped: league and broadcast footage is what got uploads blocked by Content ID claims
+  exclude_keywords: ["nba", "nfl", "mlb", "nhl", "ufc", "wwe", "premier league", "champions league",
+                     "uefa", "fifa", "la liga", "serie a", "bundesliga", "f1", "formula 1",
+                     "formula one", "grand prix", "atp", "wta", "wimbledon", "cricket", "ipl",
+                     "nascar", "world cup", "super bowl", "highlights", "touchdown",
+                     "interception", "postgame"]
   geos: ["US"]
   topics_per_run: 2
   min_duration_s: 120
   max_duration_s: 7200
   max_source_age_h: 72      # sources are searched freshest-first (last hour, today, any); older than this never
-  blocked_channels: []      # source channels never clipped from (exact name), e.g. after a copyright block
+  # source channels never clipped from (exact name): raw cuts of the publisher's own trailers
+  # are the likeliest GTA uploads to be claimed
+  blocked_channels: ["Rockstar Games"]
   # The topic mix. Every run takes its topics from the pillars used least recently, one each, so
   # the channel keeps rotating through all of them. max_share caps a pillar's share of the last
-  # pillar_window topics.
+  # pillar_window topics. 8 GTA 6 pillars + 3 other-gaming ones = about 73% GTA 6.
   pillar_window: 20
   pillars:
     - name: news
@@ -102,6 +113,19 @@ trends:
       queries: ["make money clipping GTA 6", "GTA 6 clipping channel", "GTA 6 content creator tips"]
       angle: "how people build channels clipping GTA 6: practical steps, no income promises"
       max_share: 0.15
+    # other gaming (not GTA): what the channel's best videos so far were about
+    - name: gaming news
+      queries: ["gaming news today", "video game news this week"]
+      angle: "the biggest video game story right now that is not about GTA, and what it means for players"
+      keywords: &gaming ["game", "games", "gaming", "gameplay", "nintendo", "switch 2", "zelda", "mario", "pokemon", "playstation", "ps5", "ps6", "xbox", "steam", "pc"]
+    - name: consoles and tech
+      queries: ["Switch 2 news", "PS5 Xbox news", "Digital Foundry analysis"]
+      angle: "one console, hardware or performance story players are talking about"
+      keywords: *gaming
+    - name: new games and remakes
+      queries: ["new game reveal trailer reaction", "video game remake remaster news"]
+      angle: "a newly revealed game, sequel or remake and what was actually shown"
+      keywords: *gaming
 
 # "Top 10 ..." countdown videos: LLM writes the list, narrator voices every entry over footage
 # pulled from YouTube, stitched into one vertical video with rank badges + captions.

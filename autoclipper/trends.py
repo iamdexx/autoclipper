@@ -147,13 +147,28 @@ def youtube_hot(niche: str, n: int = 8) -> list[Topic]:
     ]
 
 
-def on_focus(text: str, cfg: Config) -> bool:
-    """True when `text` names one of trends.focus_keywords as whole words (always, with none set)."""
-    kws = [k.strip() for k in cfg.trends.focus_keywords if k.strip()]
+def _names(text: str, keywords: list[str]) -> bool:
+    kws = [k.strip() for k in keywords if k.strip()]
     if not kws:
-        return True
+        return False
     pat = "|".join(r"\s*".join(re.escape(w) for w in k.split()) for k in kws)
     return re.search(rf"\b(?:{pat})\b", text or "", re.I) is not None
+
+
+def on_focus(text: str, cfg: Config, pillar: str | None = None) -> bool:
+    """True when `text` fits the channel: it names none of trends.exclude_keywords and one of
+    trends.focus_keywords (whole words; anything fits with none set). A pillar with its own
+    `keywords` is matched on those instead; `pillar=None` accepts any pillar's keywords and
+    `pillar=""` only the channel's own."""
+    t = cfg.trends
+    if _names(text, t.exclude_keywords):
+        return False
+    if not [k for k in t.focus_keywords if k.strip()]:
+        return True
+    own = [p.keywords for p in t.pillars if p.keywords and pillar in (None, p.name)]
+    if pillar is not None:
+        return _names(text, own[0] if own else t.focus_keywords)
+    return _names(text, t.focus_keywords) or any(_names(text, k) for k in own)
 
 
 def pillar_hot(query: str, n: int = 8) -> list[Topic]:
@@ -210,7 +225,7 @@ def discover(cfg: Config) -> list[Topic]:
             return []
         for tp in found:
             tp.pillar = pillar
-        return [tp for tp in found if on_focus(f"{tp.name} {tp.headline}", cfg)]
+        return [tp for tp in found if on_focus(f"{tp.name} {tp.headline}", cfg, pillar or None)]
 
     topics: list[Topic] = []
     with ThreadPoolExecutor(max_workers=6) as ex:
@@ -392,7 +407,9 @@ def find_sources(topic: Topic, cfg: Config) -> list[Candidate]:
         for c in found:
             if c.id in seen or not (t.min_duration_s <= c.duration <= t.max_duration_s):
                 continue
-            if not on_focus(c.title, cfg) or c.channel.strip().lower() in blocked:
+            if c.channel.strip().lower() in blocked:
+                continue
+            if not on_focus(c.title, cfg, topic.pillar or None):
                 continue
             if t.max_source_age_h and c.age_h is not None and c.age_h > t.max_source_age_h:
                 continue

@@ -141,6 +141,35 @@ def test_heuristic_narration_is_one_line(tmp_path):
     assert "max 9 words" in rank.PROMPT and "3-6 word" in rank.PROMPT
 
 
+def test_render_adds_the_take_after_the_clip(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.narration.provider = "gemini"
+    src = _src(tmp_path)
+
+    def fake_tts(text, voice, out):
+        subprocess.check_call(
+            ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=1000",
+             "-t", "3", "-c:a", "aac", str(out)]
+        )  # fmt: skip
+        return out
+
+    monkeypatch.setattr(narrate, "tts_gemini", fake_tts)
+    monkeypatch.setattr(narrate, "_heard", lambda voice, cfg_: [])
+    m = Moment(0.0, 6.0, "TEST HOOK", "r", 1.0, take="this changes the whole map")
+    out = render.render_clip(src, m, _segments(4), cfg, tmp_path / "clip.mp4")
+    # 6s clip, then 0.4s duck + 3s take + 0.5s fade over the footage rolling on
+    assert abs(narrate.duration(out) - (6.0 + 0.4 + 3.0 + 0.5)) < 0.3
+    caps = [ln for ln in (tmp_path / "clip.ass").read_text().splitlines() if ",Cap," in ln]
+    assert "MAP" in caps[-1].upper() and caps[-1].split(",")[1] >= "0:00:06.4"
+    # the source runs out before the take does: its last frame is held, the length is the same
+    m = Moment(2.0, 8.0, "TEST HOOK", "r", 1.0, take="this changes the whole map")
+    out = render.render_clip(src, m, _segments(4), cfg, tmp_path / "end.mp4")
+    assert abs(narrate.duration(out) - (6.0 + 0.4 + 3.0 + 0.5)) < 0.3
+    cfg.narration.take = False
+    out = render.render_clip(src, m, _segments(4), cfg, tmp_path / "off.mp4")
+    assert narrate.duration(out) < 6.6 and not (tmp_path / "off.take.m4a").exists()
+
+
 def test_render_mixes_narration(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
     cfg.narration.provider = "gemini"

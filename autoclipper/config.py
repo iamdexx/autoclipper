@@ -68,6 +68,11 @@ class Narration:
     openai_voice: str = "onyx"
     duck_db: float = -14.0  # how far the stream audio drops under the narrator
     max_len_s: float = 3.5  # a Short has ~2s to earn the viewer; longer hooks are sped up
+    # The channel's own commentary: after a clip's last line the footage rolls on, ducked, while
+    # the narrator says what it means (rank.Moment.take). Without it a video is somebody else's
+    # footage with a title, which YouTube's reused-content policy does not monetise.
+    take: bool = True
+    take_max_s: float = 9.0  # longer takes are sped up (max 1.3x)
 
 
 @dataclass
@@ -103,6 +108,9 @@ class Pillar:
     queries: list[str] = field(default_factory=list)  # YouTube searches that surface its topics
     angle: str = ""  # what a video in this pillar should be about, for the topic picker
     max_share: float = 1.0  # at most this share of recent videos comes from this pillar
+    # Its own focus: topics and sources of this pillar must name one of these instead of
+    # trends.focus_keywords (a side pillar next to the channel's main subject).
+    keywords: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -121,6 +129,9 @@ class Trends:
     # claims got an upload blocked.
     blocked_channels: list[str] = field(default_factory=list)
     focus_keywords: list[str] = field(default_factory=list)  # e.g. ["gta 6", "gta vi"]
+    # Never clipped, whatever else the title names (whole words), e.g. leagues whose broadcast
+    # footage gets uploads blocked.
+    exclude_keywords: list[str] = field(default_factory=list)
     # Topic mix: each run takes its topics from the pillars used least recently, one per pillar,
     # so the channel covers the whole range instead of whatever has the most views today.
     pillars: list[Pillar] = field(default_factory=list)

@@ -23,8 +23,15 @@ def _slug(s: str) -> str:
 
 
 def process_video(
-    url: str, creator: Creator, cfg: Config, state: State, do_publish: bool = True
+    url: str,
+    creator: Creator,
+    cfg: Config,
+    state: State,
+    do_publish: bool = True,
+    pillar: str | None = "",
 ) -> list[Path]:
+    """`pillar`: the topic-mix pillar the video was found for (None = any); a creator's own
+    upload ("") has to be about the channel's main focus."""
     meta = ingest.probe(url, creator.name)
     vdir = cfg.workdir / "videos" / meta.id
     vdir.mkdir(parents=True, exist_ok=True)
@@ -38,7 +45,7 @@ def process_video(
             meta.live_status,
         )
         return []
-    if not trends.on_focus(meta.title, cfg):
+    if not trends.on_focus(meta.title, cfg, pillar):
         log.info("skipping %s (%s): not about %s", meta.id, meta.title, cfg.trends.focus)
         state.mark_video(meta.id, OFF_FOCUS, title=meta.title, creator=creator.name)
         return []
@@ -70,14 +77,14 @@ def process_video(
         except Exception as e:
             log.error("render failed for moment %d: %s", i, e)
             continue
-        if not qa.gate(out, cfg, m.narration, kind="clip"):
+        if not qa.gate(out, cfg, f"{m.narration} {m.take}".strip(), kind="clip"):
             rejected.append(out)
             continue
         clips.append(out)
         if do_publish:
             pm = metadata.describe(
                 m.hook,
-                m.narration,
+                f"{m.narration} {m.take}".strip(),
                 metadata.moment_transcript(segments, m.start, m.end),
                 meta.title,
                 meta.uploader or creator.name,
@@ -132,6 +139,12 @@ def check_hooks(moments, segments, cfg: Config, report: Path) -> None:
             )
             m.hook = safe_hook or m.hook
             m.narration = fixed
+        if m.take:
+            tchk = verify.check_take(m.take, text, cfg)
+            rows.append({**verify.dump([tchk])[0], "kind": "take"})
+            if not verify.passes(tchk, cfg, strict=True):
+                log.warning("take rejected (%s %s): %r", tchk.verdict, tchk.note, m.take)
+                m.take = ""
     report.write_text(json.dumps(rows, indent=2))
 
 
@@ -189,7 +202,9 @@ def run_trends(cfg: Config, state: State, do_publish: bool = True) -> int:
         )
         log.info("trend %r -> %s (%s)", tp.name, src.title, src.url)
         try:
-            clips = process_video(src.url, creator, cfg, state, do_publish=do_publish)
+            clips = process_video(
+                src.url, creator, cfg, state, do_publish=do_publish, pillar=tp.pillar or None
+            )
             state.mark_topic("trend", tp.name, status="done", video=src.id, clips=len(clips))
             n += 1
         except Exception as e:

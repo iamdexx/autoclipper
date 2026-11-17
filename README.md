@@ -63,6 +63,11 @@ from Edge and ElevenLabs directly; every other provider's audio is run through W
 aligned to the script so the highlight tracks the voice just the same. Tune `duck_db`,
 `max_len_s`, or set `provider: off` in `config.yaml` to keep only the creator's own audio.
 
+With `narration.take` on, every clip also ends on the channel's own commentary: the ranker writes
+two sentences on what the moment means, the fact-check gate compares them with the clip's
+transcript (unsupported or uncheckable commentary is not spoken), and the narrator says them
+after the last line while the footage rolls on with its audio ducked.
+
 ## Trends
 
 ```
@@ -88,6 +93,11 @@ topic mix. Each pillar has its own YouTube searches and an angle; every run take
 each of the `topics_per_run` pillars used least recently (trend clips and Top-N videos share the
 rotation, kept in `state.json`), and `max_share` caps a pillar's share of the last
 `pillar_window` topics. With no pillars set, `niches` works as before.
+
+A pillar with its own `keywords` is a side subject: its topics and sources must name one of those
+instead of `focus_keywords` (creator uploads still need the main focus). The share of side pillars
+in the list is their share of uploads. `trends.exclude_keywords` are never clipped, whichever
+pillar they turn up in.
 
 ## Top 10 videos
 

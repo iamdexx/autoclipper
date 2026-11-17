@@ -332,6 +332,36 @@ def test_rejected_hook_replaces_title_too(tmp_path, monkeypatch):
     assert m.narration == "" and m.hook == "We started Apple in my parents garage back in 1976"
 
 
+def test_take_is_only_spoken_when_supported(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    segs = [Segment(0, 5, "Rockstar confirmed the map has six regions.", [])]
+    verdict = {"v": "supported"}
+
+    def llm(prompt, c):
+        if "TAKE:" not in prompt:
+            return '{"verdict": "supported", "confidence": 0.9, "note": "ok"}'
+        if verdict["v"] == "boom":
+            raise RuntimeError("503")
+        return json.dumps({"verdict": verdict["v"], "confidence": 0.9, "note": "n"})
+
+    monkeypatch.setattr(trends, "_llm", llm)
+    take = "Six regions means the biggest map Rockstar has made."
+
+    def run(name):
+        m = Moment(0, 5, "SIX REGIONS", "r", 1.0, narration="Six regions confirmed.", take=take)
+        pipeline.check_hooks([m], segs, cfg, tmp_path / name)
+        return m
+
+    assert run("a.json").take == take
+    rows = json.loads((tmp_path / "a.json").read_text())
+    assert [r.get("kind") for r in rows] == [None, "take"]
+    verdict["v"] = "unsupported"
+    m = run("b.json")
+    assert m.take == "" and m.narration == "Six regions confirmed."  # the hook is untouched
+    verdict["v"] = "boom"  # a check that could not run never lets commentary through
+    assert run("c.json").take == ""
+
+
 def test_unverifiable_hook_dropped_in_strict_mode(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
 
