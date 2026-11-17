@@ -104,7 +104,9 @@ def _ask(prompt: str, pics: list[bytes], cfg: Config) -> dict:
         raise RuntimeError("no vision model configured (needs a Gemini key)")
     if not pics:
         raise RuntimeError("no frames could be read")
-    raw = rank._call_gemini(prompt, cfg.llm_model, images=pics)
+    # llm_model names a model of the configured provider, which need not be Gemini
+    model = cfg.llm_model if rank._pick_provider(cfg) == "gemini" else None
+    raw = rank._call_gemini(prompt, model, images=pics)
     return json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
 
 

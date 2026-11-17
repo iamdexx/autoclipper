@@ -1403,8 +1403,15 @@ def test_review_verdict_needs_a_clean_checklist_and_a_high_score(tmp_path, monke
     monkeypatch.setattr(review, "frames", lambda *a, **k: [b"jpg"])
     monkeypatch.setenv("GEMINI_API_KEY", "k")
     answer = {"problems": [], "score": 8, "note": "n"}
-    monkeypatch.setattr(rank, "_call_gemini", lambda p, m, images=None: json.dumps(answer))
-    assert review.video(f, "clip", cfg).ok is True
+    models = []
+
+    def gemini(p, m, images=None):
+        models.append(m)
+        return json.dumps(answer)
+
+    monkeypatch.setattr(rank, "_call_gemini", gemini)
+    cfg.llm_provider, cfg.llm_model = "anthropic", "claude-x"  # not a model Gemini serves
+    assert review.video(f, "clip", cfg).ok is True and models == [None]
     answer["score"] = 6
     assert review.video(f, "clip", cfg).ok is False
     answer.update(score=9, problems=["foreign_overlays"])
