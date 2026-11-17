@@ -141,6 +141,35 @@ def test_heuristic_narration_is_one_line(tmp_path):
     assert "max 9 words" in rank.PROMPT and "3-6 word" in rank.PROMPT
 
 
+def test_render_adds_the_take_after_the_clip(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.narration.provider = "gemini"
+    src = _src(tmp_path)
+
+    def fake_tts(text, voice, out):
+        subprocess.check_call(
+            ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=1000",
+             "-t", "3", "-c:a", "aac", str(out)]
+        )  # fmt: skip
+        return out
+
+    monkeypatch.setattr(narrate, "tts_gemini", fake_tts)
+    monkeypatch.setattr(narrate, "_heard", lambda voice, cfg_: [])
+    m = Moment(0.0, 6.0, "TEST HOOK", "r", 1.0, take="this changes the whole map")
+    out = render.render_clip(src, m, _segments(4), cfg, tmp_path / "clip.mp4")
+    # 6s clip, then 0.4s duck + 3s take + 0.5s fade over the footage rolling on
+    assert abs(narrate.duration(out) - (6.0 + 0.4 + 3.0 + 0.5)) < 0.3
+    caps = [ln for ln in (tmp_path / "clip.ass").read_text().splitlines() if ",Cap," in ln]
+    assert "MAP" in caps[-1].upper() and caps[-1].split(",")[1] >= "0:00:06.4"
+    # the source runs out before the take does: its last frame is held, the length is the same
+    m = Moment(2.0, 8.0, "TEST HOOK", "r", 1.0, take="this changes the whole map")
+    out = render.render_clip(src, m, _segments(4), cfg, tmp_path / "end.mp4")
+    assert abs(narrate.duration(out) - (6.0 + 0.4 + 3.0 + 0.5)) < 0.3
+    cfg.narration.take = False
+    out = render.render_clip(src, m, _segments(4), cfg, tmp_path / "off.mp4")
+    assert narrate.duration(out) < 6.6 and not (tmp_path / "off.take.m4a").exists()
+
+
 def test_render_mixes_narration(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
     cfg.narration.provider = "gemini"
@@ -996,6 +1025,41 @@ def test_queue_posts_best_first_and_keeps_the_rest_for_later_runs(tmp_path, monk
         if p.get("id"):
             p["at"] -= 61 * 60
     assert queue.drain(cfg, st) == [] and "posts" in publish.over_budget("youtube", cfg, st)
+
+
+def test_queue_keeps_a_share_of_posts_for_own_narrated_videos(tmp_path):
+    from autoclipper import queue
+    from autoclipper.state import State
+
+    cfg = _queue_cfg(tmp_path)
+    cfg.publishing.max_per_day, cfg.publishing.own_share = 4, 0.0
+    st = State(tmp_path / "state.json")
+    for name, score in [("c1", 9.0), ("c2", 8.0), ("c3", 7.0), ("c4", 6.0)]:
+        _enqueue(cfg, name, score)
+    for name, score in [("t1", 2.0), ("t2", 1.0), ("t3", 0.5)]:
+        it = _enqueue(cfg, name, score)
+        it.kind = "top10"
+        queue._save(cfg, it)
+
+    def order(recent):
+        rest, out = queue.prune(cfg), []
+        while rest:
+            it = queue._next(rest, recent, cfg)
+            rest.remove(it)
+            out.append(it.meta.title)
+            recent = [*recent, it.kind]
+        return out
+
+    assert order([]) == ["c1", "c2", "c3", "c4", "t1", "t2", "t3"]
+    cfg.publishing.own_share = 0.5
+    assert order([]) == ["t1", "t2", "c1", "c2", "t3", "c3", "c4"]
+    assert order(["top10"] * 3)[:2] == ["c1", "c2"]  # the last posts were all ours
+    # an upload that failed is not a post: the next narrated video still goes before the clips
+    for i in range(2):
+        st.record_post(f"top10:{i}", f"{i}.mp4", "youtube", {"error": "x"}, kind="top10")
+    st.record_post("v", "c.mp4", "youtube", {"id": "1"}, kind="clip")
+    assert st.posted_kinds(4) == ["clip"]
+    assert queue._next(queue.prune(cfg), st.posted_kinds(4), cfg).meta.title == "t1"
 
 
 def test_queue_drain_fills_the_coming_slots_with_scheduled_posts(tmp_path, monkeypatch):

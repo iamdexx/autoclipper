@@ -27,6 +27,7 @@ class Moment:
     reason: str
     score: float
     narration: str = ""  # 1-2 spoken sentences read by the narrator over the intro
+    take: str = ""  # the narrator's commentary after the clip: what it means, from the clip only
 
 
 # ---------- candidate windows ----------
@@ -131,6 +132,7 @@ seconds, must start right where it gets good (a natural sentence beginning) and 
 Return ONLY a JSON array, no prose, each item:
 {{"start": <seconds float>, "end": <seconds float>, "hook": "<punchy 3-6 word on-screen title>",
   "narration": "<ONE short punchy sentence (max 9 words) an excited narrator says before the clip so viewers stay, e.g. 'Wait for what he says about his boss.' Plain spoken words only: no stage directions, hashtags or emojis.>",
+  "take": "<the channel's own commentary, said by the narrator right after the clip: 2 sentences, 18-28 words, telling the viewer what this moment means or why it matters. Use only what is said in the clip: no new facts, names, numbers, dates or predictions, and nothing unconfirmed stated as fact. Plain spoken words only.>",
   "reason": "<one sentence>", "score": <0-10>}}
 
 TRANSCRIPT:
@@ -274,6 +276,7 @@ def rank_llm(segments: list[Segment], cfg: Config, creator: str, provider: str) 
                 str(it.get("reason", "")),
                 float(it.get("score", 5)),
                 narration=str(it.get("narration", ""))[:240],
+                take=str(it.get("take", "")).strip()[:320] if cfg.narration.take else "",
             )
         )
     return _dedupe(sorted(moments, key=lambda m: -m.score), cfg.clips.count)

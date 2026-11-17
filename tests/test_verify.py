@@ -332,6 +332,59 @@ def test_rejected_hook_replaces_title_too(tmp_path, monkeypatch):
     assert m.narration == "" and m.hook == "We started Apple in my parents garage back in 1976"
 
 
+def test_take_is_only_spoken_when_supported(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    segs = [Segment(0, 5, "Rockstar confirmed the map has six regions.", [])]
+    verdict = {"v": "supported"}
+
+    def llm(prompt, c):
+        if "TAKE:" not in prompt:
+            return '{"verdict": "supported", "confidence": 0.9, "note": "ok"}'
+        if verdict["v"] == "boom":
+            raise RuntimeError("503")
+        return json.dumps({"verdict": verdict["v"], "confidence": 0.9, "note": "n"})
+
+    monkeypatch.setattr(trends, "_llm", llm)
+    take = "Six regions means the biggest map Rockstar has made."
+
+    def run(name):
+        m = Moment(0, 5, "SIX REGIONS", "r", 1.0, narration="Six regions confirmed.", take=take)
+        pipeline.check_hooks([m], segs, cfg, tmp_path / name)
+        return m
+
+    assert run("a.json").take == take
+    rows = json.loads((tmp_path / "a.json").read_text())
+    assert [r.get("kind") for r in rows] == [None, "take"]
+    verdict["v"] = "unsupported"
+    m = run("b.json")
+    assert m.take == "" and m.narration == "Six regions confirmed."  # the hook is untouched
+    verdict["v"] = "boom"  # a check that could not run never lets commentary through
+    assert run("c.json").take == ""
+    cfg.verify.check_hooks = False  # the take is checked on its own switch
+    assert run("d.json").take == "" and run("d.json").hook == "SIX REGIONS"
+    verdict["v"] = "supported"
+    assert run("e.json").take == take
+    assert [r.get("kind") for r in json.loads((tmp_path / "e.json").read_text())] == ["take"]
+
+
+def test_top10_footage_skips_blocked_channels_and_excluded_titles(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.trends.blocked_channels = ["Rockstar Games"]
+    cfg.trends.exclude_keywords = ["highlights"]
+    cands = [
+        trends.Candidate("a", "GTA 6 map reveal", "rockstar games", 60, 9),
+        trends.Candidate("b", "GTA 6 map reveal highlights", "Fan", 60, 8),
+    ]
+    monkeypatch.setattr(trends, "yt_search", lambda q, n, **k: cands)
+    monkeypatch.setattr(top10, "footage_matches", lambda e, t: True)
+
+    def no_download(*a, **k):
+        raise AssertionError("prohibited footage was downloaded")
+
+    monkeypatch.setattr(top10.subprocess, "run", no_download)
+    assert top10.fetch_footage(top10.Entry(1, "map reveal", "l", "q"), 5, tmp_path, cfg) is None
+
+
 def test_unverifiable_hook_dropped_in_strict_mode(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
 

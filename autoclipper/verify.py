@@ -220,6 +220,39 @@ TRANSCRIPT: {transcript}
 """
 
 
+TAKE_PROMPT = """After this clip plays, a narrator adds the channel's own TAKE on it. Check the take
+against the clip's TRANSCRIPT. Opinion and explaining why the moment matters are fine. It is
+unsupported if it states as fact anything the transcript does not contain (invented quotes, names,
+numbers, dates, outcomes), presents a rumour or leak as confirmed, or promises the viewer money
+or results.
+Return ONLY JSON: {{"verdict": "supported|unsupported", "confidence": <0-1>,
+  "note": "<one sentence>"}}
+
+TAKE: {take}
+TRANSCRIPT: {transcript}
+"""
+
+
+def check_take(take: str, transcript: str, cfg: Config) -> Check:
+    """The narrator's commentary against the clip it follows. A check that could not run stays
+    'unverifiable': commentary is only spoken when it was positively supported."""
+    chk = Check(claim=take)
+    if not transcript.strip():
+        chk.note = "no transcript for this window"
+        return chk
+    try:
+        raw = trends._llm(TAKE_PROMPT.format(take=take, transcript=transcript[:4000]), cfg)
+        j = json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
+        v = str(j.get("verdict", "")).lower()
+        chk.verdict = v if v in VERDICTS else "unverifiable"
+        chk.confidence = float(j.get("confidence", 0) or 0)
+        chk.note = str(j.get("note", ""))[:300]
+    except Exception as e:
+        log.warning("take check failed (%s)", e)
+        chk.note = f"check failed: {e}"[:300]
+    return chk
+
+
 def check_hook(hook: str, transcript: str, cfg: Config) -> tuple[Check, str]:
     """(check, replacement) - replacement is '' when the hook is fine or no fix was offered."""
     chk = Check(claim=hook)

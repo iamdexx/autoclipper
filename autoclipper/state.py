@@ -71,3 +71,11 @@ class State:
             for p in self.data["posts"]
             if p["platform"] == platform and p.get("id") and p["at"] >= cutoff
         )
+
+    def posted_kinds(self, n: int) -> list[str]:
+        """Format ('clip' / 'top10') of the last `n` videos really posted, oldest first."""
+        seen: dict[tuple, str] = {}
+        for p in self.data["posts"]:
+            if p.get("id"):
+                seen[(p["video"], p["clip"])] = p.get("kind", "clip")
+        return list(seen.values())[-n:] if n > 0 else []

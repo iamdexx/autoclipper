@@ -127,12 +127,29 @@ def prune(cfg: Config) -> list[Item]:
     return keep
 
 
+def _next(rest: list[Item], recent: list[str], cfg: Config) -> Item:
+    """The best-scoring of `rest` (best first), except that one of the channel's own narrated
+    videos goes ahead of clips while they are under publishing.own_share of the last max_per_day
+    posts (`recent`: their formats, oldest first)."""
+    p = cfg.publishing
+    w = max(1, p.max_per_day)
+    own = next((it for it in rest if it.kind == "top10"), None)
+    last = recent[-(w - 1) :] if w > 1 else []  # the window this post would complete
+    if own and p.own_share > 0 and last.count("top10") < p.own_share * w:
+        return own
+    return rest[0]
+
+
 def drain(cfg: Config, state: State, force: bool = False) -> list[Item]:
     """Post queued videos best-first until every enabled platform is over budget. A video is
     removed once nothing is waiting on budget (posted, dry-run, or given up after MAX_ATTEMPTS
     errors); returns the items that went out."""
     posted: list[Item] = []
-    for it in prune(cfg):
+    rest = prune(cfg)
+    while rest:
+        # asked again after every upload: one that failed has not used up a slot of its format
+        it = _next(rest, state.posted_kinds(cfg.publishing.max_per_day), cfg)
+        rest.remove(it)
         res = publish.publish_all(
             _dir(cfg) / it.id / it.video,
             it.hook or it.meta.title,

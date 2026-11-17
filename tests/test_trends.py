@@ -26,6 +26,7 @@ def _cfg(tmp_path):
     cfg.look.watermark = ""  # caption tests count Dialogue lines
     cfg.trends.topics_per_run = 1
     cfg.trends.focus_keywords, cfg.trends.pillars = [], []  # generic channel; _mix() sets a focus
+    cfg.trends.exclude_keywords = []
     return cfg
 
 
@@ -173,11 +174,40 @@ def test_on_focus_matches_whole_keywords_only(tmp_path):
     assert not trends.on_focus("Regatta highlights", cfg) and not trends.on_focus("", cfg)
 
 
-def test_config_pillars_cover_a_range_and_cap_the_clipping_one():
+def test_on_focus_side_pillars_and_excluded_words(tmp_path):
+    from autoclipper.config import Pillar
+
+    cfg = _mix(_cfg(tmp_path))
+    cfg.trends.pillars.append(Pillar("gaming", ["gaming news"], keywords=["zelda", "switch 2"]))
+    cfg.trends.exclude_keywords = ["nba", "premier league"]
+    zelda = "Zelda on Switch 2 looks unreal"
+    assert trends.on_focus(zelda, cfg) and trends.on_focus(zelda, cfg, "gaming")
+    assert not trends.on_focus(zelda, cfg, "news") and not trends.on_focus(zelda, cfg, "")
+    assert trends.on_focus("GTA 6 map", cfg, "news") and trends.on_focus("GTA 6 map", cfg, "")
+    assert not trends.on_focus("GTA 6 map", cfg, "gaming")  # a side pillar stays off the main one
+    assert not trends.on_focus("NBA 2K x GTA 6 crossover", cfg)
+    assert not trends.on_focus("Premier  League stars play Zelda", cfg, "gaming")
+    cfg.trends.focus_keywords = []
+    assert not trends.on_focus("NBA finals", cfg) and trends.on_focus("anything else", cfg)
+
+
+def test_config_mix_is_mostly_gta_with_gaming_on_the_side():
     t = Config.load(ROOT / "config.yaml").trends
     assert len(t.pillars) >= 6 and all(p.queries for p in t.pillars)
     capped = [p for p in t.pillars if p.max_share < 1]
     assert [p.name for p in capped] == ["clipping gta 6"]
+    side = [p for p in t.pillars if p.keywords]
+    assert side and 0.65 <= 1 - len(side) / len(t.pillars) <= 0.8
+    cfg = Config.load(ROOT / "config.yaml")
+    used: list[str] = []
+    for _ in range(110):  # the rotation gives every pillar its turn, so the split holds
+        used += [p.name for p in trends.next_pillars(cfg, used, 2)]
+    assert 0.65 <= 1 - sum(n in {p.name for p in side} for n in used) / len(used) <= 0.8
+    assert "rockstar games" in [b.lower() for b in t.blocked_channels]
+    for title in ("Arsenal vs Chelsea Premier League highlights", "F1 Las Vegas Grand Prix game"):
+        assert not trends.on_focus(title, cfg)
+    assert trends.on_focus("Zelda Ocarina of Time Switch 2 lighting review", cfg)
+    assert not trends.on_focus("Zelda Ocarina of Time Switch 2 lighting review", cfg, "")
 
 
 def test_next_pillars_rotates_and_respects_max_share(tmp_path):
@@ -248,6 +278,17 @@ def test_pick_topics_takes_one_per_pillar_in_turn(tmp_path, monkeypatch):
     assert "GTA 6 clipping" not in seen["p"] and "- news" in seen["p"]
     picked = trends.pick_topics(topics, cfg, used=[], pillars_used=["news", "map"])
     assert picked[0].pillar == "money"
+
+
+def test_untagged_trend_only_fills_a_pillar_about_its_subject(tmp_path):
+    from autoclipper.config import Pillar
+
+    cfg = _mix(_cfg(tmp_path))
+    cfg.trends.pillars = [Pillar("news", ["q"]), Pillar("gaming", ["g"], keywords=["zelda"])]
+    cfg.trends.topics_per_run = 2
+    zelda = Topic("Zelda remake", "google", 9000)
+    picked = trends.pick_topics([zelda], cfg, used=[], pillars_used=[])
+    assert [(t.name, t.pillar) for t in picked] == [("Zelda remake", "gaming")]
 
 
 def test_find_sources_drops_off_focus_videos(tmp_path, monkeypatch):
