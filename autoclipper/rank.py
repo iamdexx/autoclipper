@@ -213,7 +213,13 @@ def _call_gemini(prompt: str, model: str | None, images: list[bytes] | None = No
     for attempt in range(4):
         for m in models:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
-            r = requests.post(url, headers={"x-goog-api-key": key}, json=body, timeout=180)
+            try:
+                r = requests.post(url, headers={"x-goog-api-key": key}, json=body, timeout=120)
+            except (requests.Timeout, requests.ConnectionError) as e:
+                # a model that hangs under load is as down as one that answers 503
+                last = RuntimeError(f"gemini {m} {type(e).__name__}: {str(e)[:200]}")
+                log.warning("%s - trying next model", last)
+                continue
             if r.status_code in (429, 500, 503):
                 last = RuntimeError(f"gemini {m} {r.status_code}: {r.text[:200]}")
                 log.warning("%s - trying next model", last)
