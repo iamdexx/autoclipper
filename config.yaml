@@ -48,6 +48,7 @@ publishing:
   queue_max_items: 24
   own_share: 0.5             # half the posts are our own narrated videos (top10), ahead of better-scoring clips
   cta: "Subscribe to Clipverse HQ for GTA 6 and gaming news, details and the best moments, every day."
+  outro: "Subscribe for more stories like this."  # spoken + captioned at the end of our own videos; "" = off
 
 narration:
   provider: auto        # auto = edge (no key) > azure > google > elevenlabs > gemini > openai, next one when a call fails | off

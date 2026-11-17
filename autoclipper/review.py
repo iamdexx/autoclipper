@@ -61,6 +61,9 @@ Return ONLY JSON:
      "empty_frame"        - the picture is a small strip inside black bars, or mostly blank,
      "slideshow_of_text"  - the picture is mostly screenshots of articles or text cards,
      "wrong_pictures"     - what is shown does not match what is being said,
+     "inconsistent_wording" - the on-screen title and the narration name the same thing with
+                            different words (title says "railway", narrator says "railroad"),
+                            or a caption shows a different word from the one spoken,
      "says_nothing"       - a viewer learns no specific fact or argued opinion,
      "hype_filler"        - our host's lines are hype instead of information,
      "repeats_itself"     - the same sentence or point is said twice,

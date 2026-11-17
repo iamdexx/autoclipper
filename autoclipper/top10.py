@@ -120,6 +120,9 @@ fewer. No predictions, no rumours stated as fact.
 Every beat is shown over ONE real photograph from Wikimedia Commons, so "query" must name a
 real-world subject a photo exists of (a place, a person, an object, a building, an animal), 2-4
 words, proper nouns first - never a game screenshot, a logo or an abstract idea.
+Use one word for one thing from the title to the last beat (if the title says "railway", never
+say "railroad"), and the spelling of the place the story is set in. Open the intro on the single
+most surprising fact. Each beat's photo must show what that beat talks about.
 Narration is plain spoken words only: no emojis, hashtags, stage directions or numbering.
 Return ONLY JSON:
 {{"title": "<the question or claim, max 9 words, Title Case>",
@@ -448,6 +451,9 @@ def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
     if script.intro or story:  # a story always opens on its title, said aloud if nothing else
         segments.append((script.intro or script.title, script.entries[0]))
     segments += [(e.line, e) for e in script.entries]
+    outro = cfg.publishing.outro.strip() if story else ""
+    if outro:  # the subscribe line rides on the last photo
+        segments.append((outro, script.entries[-1]))
     parts: list[Path] = []
     for i, (text, entry) in enumerate(segments):
         seg = vdir / "segments" / f"{i:02d}.mp4"
@@ -612,7 +618,10 @@ def narration_text(script: Script, cfg: Config | None = None) -> str:
     intro = script.intro
     if not intro and cfg is not None and cfg.top10.style == "explainer":
         intro = script.title
-    return " ".join([intro, *(e.line for e in script.entries)]).strip()
+    outro = ""
+    if cfg is not None and cfg.top10.style == "explainer":
+        outro = cfg.publishing.outro.strip()
+    return " ".join([intro, *(e.line for e in script.entries), outro]).strip()
 
 
 def make(topic: str, angle: str, cfg: Config, vdir: Path) -> tuple[Path, Script]:
