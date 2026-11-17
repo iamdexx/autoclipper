@@ -3,8 +3,17 @@ on:
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
+  # GitHub's schedule has skipped whole afternoons. A comment "/run-clipper" on any issue or PR,
+  # from the repo owner or the Devin app, starts a run on main (same state cache as the schedule).
+  issue_comment:
+    types: [created]
 jobs:
   run:
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (startsWith(github.event.comment.body, '/run-clipper') &&
+       (github.event.comment.author_association == 'OWNER' ||
+        github.event.comment.user.login == 'devin-ai-integration[bot]'))
     runs-on: ubuntu-latest
     timeout-minutes: 340
     concurrency: autoclipper
