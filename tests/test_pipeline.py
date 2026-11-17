@@ -1391,6 +1391,8 @@ def test_nothing_posts_until_it_passes_the_review(tmp_path, monkeypatch):
     assert left["good.mp4"].reviewed and not left["later.mp4"].reviewed
     queue.review_pending(cfg)  # a pass is not asked for twice; two failed tries and it is gone
     assert asked.count("good.mp4") == 1 and [it.video for it in queue.items(cfg)] == ["good.mp4"]
+    # a timeout is retried once and does not hold back the videos queued behind it
+    assert asked.count("later.mp4") == 4 and asked.index("later.mp4") > asked.index("slop.mp4")
 
 
 def test_review_verdict_needs_a_clean_checklist_and_a_high_score(tmp_path, monkeypatch):
