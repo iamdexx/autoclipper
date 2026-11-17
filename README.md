@@ -179,7 +179,9 @@ between them (YouTube's default API quota is 10,000 units/day at 1,600 per uploa
 uploads). Every finished video goes into the posting queue (`data/queue`, cached between Actions
 runs together with the state); each run posts the best-scoring queued video(s) as far as the
 budget allows, and the rest wait - up to `queue_max_age_h` hours / `queue_max_items` entries
-(weakest dropped first). `autoclipper queue` shows what's waiting and whether a slot is open;
+(weakest dropped first). `publishing.own_share` keeps that share of the posts for the channel's own
+narrated videos (Top-N): while they are under it, a queued one goes out before a better-scoring
+clip. `autoclipper queue` shows what's waiting and whether a slot is open;
 `autoclipper queue --drain` posts now.
 
 ```bash

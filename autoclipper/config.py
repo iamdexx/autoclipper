@@ -92,6 +92,9 @@ class Publishing:
     schedule_ahead_h: int = 12
     queue_max_age_h: int = 48
     queue_max_items: int = 24
+    # Share of posts kept for the channel's own narrated videos (kind 'top10'): while they are
+    # under it in the last max_per_day posts, a queued one goes out before a better-scoring clip.
+    own_share: float = 0.0
     title_template: str = "{hook} | {creator} #shorts"
     caption_template: str = "{hook}\n\nclip from {creator}'s stream\n{hashtags}"
     top10_title_template: str = "{hook} #shorts"

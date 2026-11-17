@@ -1027,6 +1027,28 @@ def test_queue_posts_best_first_and_keeps_the_rest_for_later_runs(tmp_path, monk
     assert queue.drain(cfg, st) == [] and "posts" in publish.over_budget("youtube", cfg, st)
 
 
+def test_queue_keeps_a_share_of_posts_for_own_narrated_videos(tmp_path):
+    from autoclipper import queue
+    from autoclipper.state import State
+
+    cfg = _queue_cfg(tmp_path)
+    cfg.publishing.max_per_day, cfg.publishing.own_share = 4, 0.0
+    st = State(tmp_path / "state.json")
+    for name, score in [("c1", 9.0), ("c2", 8.0), ("c3", 7.0), ("c4", 6.0)]:
+        _enqueue(cfg, name, score)
+    for name, score in [("t1", 2.0), ("t2", 1.0), ("t3", 0.5)]:
+        it = _enqueue(cfg, name, score)
+        it.kind = "top10"
+        queue._save(cfg, it)
+    order = lambda: [it.meta.title for it in queue._own_first(queue.prune(cfg), cfg, st)]  # noqa: E731
+    assert order() == ["c1", "c2", "c3", "c4", "t1", "t2", "t3"]
+    cfg.publishing.own_share = 0.5
+    assert order() == ["t1", "t2", "c1", "c2", "t3", "c3", "c4"]
+    for i in range(3):  # the last posts were all ours: clips catch up first
+        st.record_post(f"top10:{i}", f"{i}.mp4", "youtube", {"id": str(i)}, kind="top10")
+    assert order()[:2] == ["c1", "c2"]
+
+
 def test_queue_drain_fills_the_coming_slots_with_scheduled_posts(tmp_path, monkeypatch):
     """With scheduling on, one run empties the queue into now + the next gaps (best first) and
     stops at the daily cap; the leftovers wait for the next run."""

@@ -45,6 +45,7 @@ publishing:
   schedule_ahead_h: 12       # a run uploads queued videos as scheduled YouTube posts this far ahead
   queue_max_age_h: 48        # the best-scoring queued video posts first; the rest age out
   queue_max_items: 24
+  own_share: 0.5             # half the posts are our own narrated videos (top10), ahead of better-scoring clips
   cta: "Subscribe to Clipverse HQ for GTA 6 and gaming news, details and the best moments, every day."
 
 narration:
