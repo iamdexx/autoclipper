@@ -156,11 +156,14 @@ def _names(text: str, keywords: list[str]) -> bool:
 
 
 def rights_ok(title: str, channel: str, cfg: Config) -> bool:
-    """False for footage the channel never uses: a trends.blocked_channels upload or a title
-    naming one of trends.exclude_keywords."""
+    """False for footage the channel never uses: an upload by a trends.blocked_channels channel
+    or one of its regional channels ("Rockstar Games" also blocks "Rockstar Games Polska"), or a
+    title naming one of trends.exclude_keywords."""
     t = cfg.trends
-    if channel.strip().lower() in {b.strip().lower() for b in t.blocked_channels}:
-        return False
+    name = channel.strip().lower()
+    for b in (b.strip().lower() for b in t.blocked_channels):
+        if b and name.startswith(b) and not name[len(b) : len(b) + 1].isalnum():
+            return False
     return not _names(title, t.exclude_keywords)
 
 

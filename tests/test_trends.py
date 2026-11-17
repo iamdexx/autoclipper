@@ -305,6 +305,23 @@ def test_find_sources_drops_off_focus_videos(tmp_path, monkeypatch):
     assert trends.find_sources(Topic("x", "g"), cfg) == []
 
 
+def test_rights_ok_blocks_regional_channels_of_a_blocked_channel(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.trends.blocked_channels = ["Rockstar Games"]
+    for ch in [
+        "Rockstar Games",
+        " rockstar games ",
+        "Rockstar Games Polska",
+        "Rockstar Games América Latina",
+        "Rockstar Games Deutschland, Österreich & Schweiz",
+    ]:
+        assert not trends.rights_ok("GTA 6 launch trailer", ch, cfg), ch
+    for ch in ["Rockstar Gamesy", "RockstarGamesFan", "Not Rockstar Games", "gameranx"]:
+        assert trends.rights_ok("GTA 6 launch trailer", ch, cfg), ch
+    cfg.trends.blocked_channels = [" "]
+    assert trends.rights_ok("GTA 6 launch trailer", "anyone", cfg)
+
+
 def test_state_pillars(tmp_path):
     st = State(tmp_path / "state.json")
     st.mark_pillar("news")

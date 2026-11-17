@@ -100,7 +100,8 @@ would be picked; add `--clip` to actually make the clips.
 ### Channel focus and topic mix
 
 `trends.blocked_channels` lists source channels that are never clipped from (use it when a
-rights holder's claim blocks an upload). Videos already waiting in the posting queue are dropped
+rights holder's claim blocks an upload); a name also blocks its regional channels, so
+"Rockstar Games" covers "Rockstar Games Polska" and "Rockstar Games América Latina". Videos already waiting in the posting queue are dropped
 when they no longer match `trends.focus_keywords`.
 
 `trends.focus_keywords` keeps the channel on one subject: a trend topic, a source video or a
