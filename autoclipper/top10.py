@@ -448,6 +448,9 @@ def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
     if script.intro or story:  # a story always opens on its title, said aloud if nothing else
         segments.append((script.intro or script.title, script.entries[0]))
     segments += [(e.line, e) for e in script.entries]
+    outro = cfg.publishing.outro.strip() if story else ""
+    if outro:  # the subscribe line rides on the last photo
+        segments.append((outro, script.entries[-1]))
     parts: list[Path] = []
     for i, (text, entry) in enumerate(segments):
         seg = vdir / "segments" / f"{i:02d}.mp4"
@@ -612,7 +615,10 @@ def narration_text(script: Script, cfg: Config | None = None) -> str:
     intro = script.intro
     if not intro and cfg is not None and cfg.top10.style == "explainer":
         intro = script.title
-    return " ".join([intro, *(e.line for e in script.entries)]).strip()
+    outro = ""
+    if cfg is not None and cfg.top10.style == "explainer":
+        outro = cfg.publishing.outro.strip()
+    return " ".join([intro, *(e.line for e in script.entries), outro]).strip()
 
 
 def make(topic: str, angle: str, cfg: Config, vdir: Path) -> tuple[Path, Script]:

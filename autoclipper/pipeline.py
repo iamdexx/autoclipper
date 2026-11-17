@@ -292,6 +292,9 @@ def make_top10(
             cfg,
             kind="top10",
         )
+        if cfg.top10.style == "explainer":
+            # the question on screen is the title people click; a rewrite loses it
+            pm.title = metadata.clip_title(script.title)
         (vdir / "post.json").write_text(json.dumps(asdict(pm), indent=2))
         queue.enqueue(
             out,

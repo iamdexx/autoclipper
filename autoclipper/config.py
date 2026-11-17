@@ -104,6 +104,9 @@ class Publishing:
     top10_caption_template: str = "{hook}\n\n{hashtags}"
     default_hashtags: list[str] = field(default_factory=lambda: ["#shorts"])
     cta: str = ""  # one line added to every description above the hashtags (subscribe nudge)
+    # said by the narrator, with captions, as the last ~2 seconds of the channel's own videos
+    # ("" = no spoken outro)
+    outro: str = ""
 
 
 @dataclass

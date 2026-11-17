@@ -1450,8 +1450,14 @@ def test_explainer_is_built_from_photos_with_its_title_and_never_thumbnails(tmp_
     top10.build(script, cfg, tmp_path / "v")
     assert asked == [False, False, False]
     assert shown[0][:2] == ("a", "How Humans Survived The Ice Age")
-    assert [s[0] for s in shown] == ["a", "a", "b", "c"] and not any(s[1] for s in shown[1:])
-    assert [s[2] for s in shown] == [False, True, False, True]  # the push alternates
+    # title card on the first photo, then each beat, then the subscribe line on the last photo
+    assert [s[0] for s in shown] == ["a", "a", "b", "c", "c"] and not any(s[1] for s in shown[1:])
+    assert [s[2] for s in shown] == [False, True, False, True, False]  # the push alternates
+    assert top10.narration_text(script, cfg).endswith(cfg.publishing.outro)
+    cfg.publishing.outro = ""
+    shown.clear()
+    top10.build(script, cfg, tmp_path / "v2")
+    assert len(shown) == 4
     assert script.title == "How Humans Survived The Ice Age"
     assert top10.narration_text(script, cfg).startswith("How Humans Survived")
 
