@@ -1490,3 +1490,42 @@ def test_own_scripted_video_is_not_pruned_for_being_off_focus(tmp_path):
         f.write_bytes(b"x")
         queue.enqueue(f, kind, name, 5.0, metadata.PostMeta(title, "d", [], ""), cfg)
     assert [it.video for it in queue.prune(cfg)] == ["ice.mp4"]
+
+
+def test_gemini_moves_to_next_model_when_one_hangs(monkeypatch):
+    import requests
+
+    calls = []
+
+    class Ok:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"candidates": [{"content": {"parts": [{"text": '{"score": 8}'}]}}]}
+
+    def post(url, **kw):
+        calls.append(url.split("/models/")[1].split(":")[0])
+        if len(calls) == 1:
+            raise requests.ReadTimeout("read timed out")
+        return Ok()
+
+    monkeypatch.setattr(rank, "_gemini_key", lambda: "k")
+    monkeypatch.setattr(requests, "post", post)
+    assert rank._call_gemini("p", None) == '{"score": 8}'
+    assert calls == rank.GEMINI_MODELS[:2]
+
+
+def test_gemini_gives_up_when_every_model_hangs(monkeypatch):
+    import requests
+
+    def post(url, **kw):
+        raise requests.ConnectionError("reset")
+
+    monkeypatch.setattr(rank, "_gemini_key", lambda: "k")
+    monkeypatch.setattr(requests, "post", post)
+    monkeypatch.setattr(rank.time, "sleep", lambda s: None)
+    with pytest.raises(RuntimeError, match="ConnectionError"):
+        rank._call_gemini("p", "gemini-flash-latest")
