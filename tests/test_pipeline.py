@@ -1040,13 +1040,26 @@ def test_queue_keeps_a_share_of_posts_for_own_narrated_videos(tmp_path):
         it = _enqueue(cfg, name, score)
         it.kind = "top10"
         queue._save(cfg, it)
-    order = lambda: [it.meta.title for it in queue._own_first(queue.prune(cfg), cfg, st)]  # noqa: E731
-    assert order() == ["c1", "c2", "c3", "c4", "t1", "t2", "t3"]
+
+    def order(recent):
+        rest, out = queue.prune(cfg), []
+        while rest:
+            it = queue._next(rest, recent, cfg)
+            rest.remove(it)
+            out.append(it.meta.title)
+            recent = [*recent, it.kind]
+        return out
+
+    assert order([]) == ["c1", "c2", "c3", "c4", "t1", "t2", "t3"]
     cfg.publishing.own_share = 0.5
-    assert order() == ["t1", "t2", "c1", "c2", "t3", "c3", "c4"]
-    for i in range(3):  # the last posts were all ours: clips catch up first
-        st.record_post(f"top10:{i}", f"{i}.mp4", "youtube", {"id": str(i)}, kind="top10")
-    assert order()[:2] == ["c1", "c2"]
+    assert order([]) == ["t1", "t2", "c1", "c2", "t3", "c3", "c4"]
+    assert order(["top10"] * 3)[:2] == ["c1", "c2"]  # the last posts were all ours
+    # an upload that failed is not a post: the next narrated video still goes before the clips
+    for i in range(2):
+        st.record_post(f"top10:{i}", f"{i}.mp4", "youtube", {"error": "x"}, kind="top10")
+    st.record_post("v", "c.mp4", "youtube", {"id": "1"}, kind="clip")
+    assert st.posted_kinds(4) == ["clip"]
+    assert queue._next(queue.prune(cfg), st.posted_kinds(4), cfg).meta.title == "t1"
 
 
 def test_queue_drain_fills_the_coming_slots_with_scheduled_posts(tmp_path, monkeypatch):

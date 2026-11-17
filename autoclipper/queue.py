@@ -127,23 +127,17 @@ def prune(cfg: Config) -> list[Item]:
     return keep
 
 
-def _own_first(its: list[Item], cfg: Config, state: State) -> list[Item]:
-    """Best-first, except that the channel's own narrated videos go ahead of clips while they
-    are under publishing.own_share of the last max_per_day posts."""
+def _next(rest: list[Item], recent: list[str], cfg: Config) -> Item:
+    """The best-scoring of `rest` (best first), except that one of the channel's own narrated
+    videos goes ahead of clips while they are under publishing.own_share of the last max_per_day
+    posts (`recent`: their formats, oldest first)."""
     p = cfg.publishing
-    if p.own_share <= 0:
-        return its
     w = max(1, p.max_per_day)
-    recent = state.posted_kinds(w)
-    rest, out = list(its), []
-    while rest:
-        own = next((it for it in rest if it.kind == "top10"), None)
-        short = recent[-(w - 1) :].count("top10") < p.own_share * w if w > 1 else True
-        pick = own if own and short else rest[0]
-        rest.remove(pick)
-        out.append(pick)
-        recent.append(pick.kind)
-    return out
+    own = next((it for it in rest if it.kind == "top10"), None)
+    last = recent[-(w - 1) :] if w > 1 else []  # the window this post would complete
+    if own and p.own_share > 0 and last.count("top10") < p.own_share * w:
+        return own
+    return rest[0]
 
 
 def drain(cfg: Config, state: State, force: bool = False) -> list[Item]:
@@ -151,7 +145,11 @@ def drain(cfg: Config, state: State, force: bool = False) -> list[Item]:
     removed once nothing is waiting on budget (posted, dry-run, or given up after MAX_ATTEMPTS
     errors); returns the items that went out."""
     posted: list[Item] = []
-    for it in _own_first(prune(cfg), cfg, state):
+    rest = prune(cfg)
+    while rest:
+        # asked again after every upload: one that failed has not used up a slot of its format
+        it = _next(rest, state.posted_kinds(cfg.publishing.max_per_day), cfg)
+        rest.remove(it)
         res = publish.publish_all(
             _dir(cfg) / it.id / it.video,
             it.hook or it.meta.title,
