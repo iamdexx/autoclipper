@@ -82,7 +82,8 @@ trends:
   min_duration_s: 120
   max_duration_s: 7200
   max_source_age_h: 72      # sources are searched freshest-first (last hour, today, any); older than this never
-  # source channels never clipped from (exact name): raw cuts of the publisher's own trailers
+  # source channels never clipped from (exact name; also blocks the name's regional channels,
+  # e.g. "Rockstar Games Polska"): raw cuts of the publisher's own trailers
   # are the likeliest GTA uploads to be claimed
   blocked_channels: ["Rockstar Games"]
   # source quality: spoken language must be one of these, and a person has to be on camera
