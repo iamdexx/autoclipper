@@ -1259,6 +1259,19 @@ def test_workflow_persists_queue_with_state():
     assert wf.count("data/queue") == 2 and wf.count("data/state.json") == 2
 
 
+def test_comment_runs_dispatch_instead_of_posting():
+    # issue_comment runs cannot save the cache, so they must never run the pipeline themselves
+    import yaml
+
+    wf = yaml.safe_load((ROOT / ".github" / "workflows" / "clip.yml").read_text())
+    jobs = wf["jobs"]
+    assert jobs["run"]["if"] == "github.event_name != 'issue_comment'"
+    d = jobs["dispatch"]
+    assert "github.event_name == 'issue_comment'" in d["if"] and "/run-clipper" in d["if"]
+    assert d["permissions"] == {"actions": "write"}
+    assert "gh workflow run clip.yml" in d["steps"][0]["run"]
+
+
 def test_filler_is_caught_and_plain_facts_are_not():
     from autoclipper import slop
 

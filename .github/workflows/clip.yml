@@ -4,16 +4,27 @@ on:
     - cron: "*/15 * * * *"
   workflow_dispatch:
   # GitHub's schedule has skipped whole afternoons. A comment "/run-clipper" on any issue or PR,
-  # from the repo owner or the Devin app, starts a run on main (same state cache as the schedule).
+  # from the repo owner or the Devin app, starts a run on main. The comment run only dispatches:
+  # issue_comment runs get a read-only cache token, so a run started by one would post without
+  # saving what it posted, and the next run would post the same video again.
   issue_comment:
     types: [created]
 jobs:
-  run:
+  dispatch:
     if: >-
-      github.event_name != 'issue_comment' ||
-      (startsWith(github.event.comment.body, '/run-clipper') &&
-       (github.event.comment.author_association == 'OWNER' ||
-        github.event.comment.user.login == 'devin-ai-integration[bot]'))
+      github.event_name == 'issue_comment' &&
+      startsWith(github.event.comment.body, '/run-clipper') &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.user.login == 'devin-ai-integration[bot]')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - run: gh workflow run clip.yml --repo "$GITHUB_REPOSITORY" --ref main
+        env:
+          GH_TOKEN: ${{ github.token }}
+  run:
+    if: github.event_name != 'issue_comment'
     runs-on: ubuntu-latest
     timeout-minutes: 340
     concurrency: autoclipper
