@@ -627,7 +627,8 @@ def test_publish_youtube_body_schedules_private_until_publish_at(tmp_path, monke
     assert "at" not in res
 
 
-def test_publish_youtube_skips_a_title_already_on_the_channel(tmp_path, monkeypatch):
+@pytest.mark.parametrize("scheduled", [True, False])
+def test_publish_youtube_skips_a_title_already_on_the_channel(tmp_path, monkeypatch, scheduled):
     # a run that could not save its state forgets its post; the next one must not upload it again
     from autoclipper import publish
 
@@ -647,11 +648,13 @@ def test_publish_youtube_skips_a_title_already_on_the_channel(tmp_path, monkeypa
 
         def playlistItems(self):
             items = [{"snippet": {"title": "Old one", "resourceId": {"videoId": "old"}}},
-                     {"snippet": {"title": "Train for the Dead", "resourceId": {"videoId": "v9"}}}]  # fmt: skip
+                     {"snippet": {"title": "Train for the Dead", "resourceId": {"videoId": "v9"}, "publishedAt": "2026-11-18T10:00:00Z"}}]  # fmt: skip
             return type("P", (), {"list": lambda s, **k: Call({"items": items})})()
 
         def videos(self):
             st = {"items": [{"status": {"publishAt": "2026-11-18T20:30:00Z"}}]}
+            if not scheduled:  # went public later than its playlist insertion
+                st = {"items": [{"status": {}, "snippet": {"publishedAt": "2026-11-18T20:30:00Z"}}]}
             return type(
                 "V",
                 (),
@@ -663,7 +666,7 @@ def test_publish_youtube_skips_a_title_already_on_the_channel(tmp_path, monkeypa
     monkeypatch.setattr("googleapiclient.http.MediaFileUpload", lambda *a, **k: object())
     (tmp_path / "v.mp4").write_bytes(b"x")
     res = publish.publish_youtube(tmp_path / "v.mp4", "Train for the Dead", "d", [])
-    # `at` is the scheduled go-live time already on YouTube, so the budget keeps that slot
+    # `at` is the go-live time on YouTube (not the playlist insertion), so the budget keeps that slot
     assert res == {
         "id": "v9",
         "url": "https://youtube.com/shorts/v9",

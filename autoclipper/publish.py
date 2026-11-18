@@ -106,10 +106,15 @@ def _existing_upload(yt, title: str) -> tuple[str, float | None]:
         if sn.get("title", "").strip() != title.strip():
             continue
         vid = sn.get("resourceId", {}).get("videoId", "")
-        when = sn.get("publishedAt")
-        try:  # a scheduled video goes live at status.publishAt, which spaces the posting budget
-            v = yt.videos().list(part="status", id=vid).execute().get("items", [])
-            when = (v[0].get("status", {}).get("publishAt") if v else None) or when
+        when = sn.get("publishedAt")  # playlist insertion: only a fallback
+        try:  # the budget spaces go-live times: status.publishAt if scheduled, else the video's
+            v = yt.videos().list(part="status,snippet", id=vid).execute().get("items", [])
+            if v:
+                when = (
+                    v[0].get("status", {}).get("publishAt")
+                    or v[0].get("snippet", {}).get("publishedAt")
+                    or when
+                )
         except Exception as e:
             log.warning("youtube: could not read the schedule of %s (%s)", vid, e)
         return vid, _epoch(when)
