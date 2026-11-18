@@ -229,6 +229,7 @@ def test_narration_provider_selection(monkeypatch):
         "GOOGLE_API_KEY",
         "Geminikey",
         "OPENAI_API_KEY",
+        "NVIDIA_API_KEY",
     ):
         monkeypatch.delenv(k, raising=False)
     assert narrate.providers(cfg) == ["edge"]  # no key needed
@@ -1620,3 +1621,45 @@ def test_nvidia_is_first_choice_and_falls_back_to_gemini(tmp_path, monkeypatch):
     monkeypatch.delenv("Geminikey", raising=False)
     with pytest.raises(RuntimeError, match="429"):
         rank._call_nvidia("hi", None)
+
+
+def test_nvidia_voices_take_turns_one_per_video(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.narration.provider = "auto"
+    monkeypatch.setenv("NVIDIA_API_KEY", "n")
+    assert narrate.providers(cfg)[:2] == ["nvidia", "edge"]  # edge stays as the backup
+    # every line of one video is the same voice, whether an explainer's segments or a clip's
+    # hook and take
+    a = [
+        narrate.nvidia_voice(cfg, tmp_path / "vid-a" / "segments" / f"{i:02d}.voice.m4a")
+        for i in range(4)
+    ]
+    assert len(set(a)) == 1 and a[0].startswith("Magpie-Multilingual.EN-US.")
+    assert narrate.nvidia_voice(cfg, tmp_path / "c1.voice.m4a") == narrate.nvidia_voice(
+        cfg, tmp_path / "c1.take.m4a"
+    )
+    # and across videos every configured voice gets used
+    used = {narrate.nvidia_voice(cfg, tmp_path / f"clip{i}.voice.m4a") for i in range(40)}
+    assert used == {f"Magpie-Multilingual.EN-US.{v}" for v in cfg.narration.nvidia_voices}
+
+
+def test_nvidia_tts_without_audio_is_a_failure_and_does_not_wait_after_the_last_try(
+    tmp_path, monkeypatch
+):
+    class R:
+        def __init__(self, code, content=b""):
+            self.status_code, self.content = code, content
+
+        def raise_for_status(self):
+            if self.status_code != 200:
+                raise RuntimeError(f"http {self.status_code}")
+
+    slept = []
+    monkeypatch.setattr(narrate.time, "sleep", slept.append)
+    monkeypatch.setattr(narrate.requests, "post", lambda *a, **k: R(200, b"RIFF" + b"\0" * 40))
+    with pytest.raises(RuntimeError, match="no audio"):  # a header with no samples
+        narrate.tts_nvidia("hi", "v", tmp_path / "a.m4a")
+    monkeypatch.setattr(narrate.requests, "post", lambda *a, **k: R(503))
+    with pytest.raises(RuntimeError, match="503"):
+        narrate.tts_nvidia("hi", "v", tmp_path / "a.m4a")
+    assert slept == [5, 10]  # nothing to wait for after the third refusal

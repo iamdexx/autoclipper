@@ -51,13 +51,14 @@ publishing:
   outro: "Subscribe for more stories like this."  # spoken + captioned at the end of our own videos; "" = off
 
 narration:
-  provider: auto        # auto = edge (no key) > azure > google > elevenlabs > gemini > openai, next one when a call fails | off
+  provider: auto        # auto = nvidia > edge (no key) > azure > google > elevenlabs > gemini > openai, next one when a call fails | off
   edge_voice: en-US-GuyNeural  # AndrewMultilingual/BrianMultilingual/Christopher/Roger ... (edge-tts --list-voices)
   edge_rate: 1.05
   azure_voice: en-US-GuyNeural  # AndrewMultilingual/BrianMultilingual/Davis/Steffan/Christopher ...
   azure_rate: 1.05
   google_voice: Charon  # Cloud TTS Chirp 3 HD: Fenrir, Orus, Puck, Algenib, Iapetus ...
   google_rate: 1.0
+  nvidia_voices: [Jason, Aria, Leo, Mia]  # take turns, one voice per video; also Diego, Isabela, Louise, Pascal, Ray, Sofia
   gemini_voice: Puck    # Kore, Charon, Fenrir, Aoede, Leda ...
   duck_db: -14
   max_len_s: 3.5        # the narrator's hook: one line, then the clip; longer is sped up (max 1.3x) or dropped
