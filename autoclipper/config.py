@@ -54,7 +54,8 @@ class Look:
 
 @dataclass
 class Narration:
-    provider: str = "auto"  # auto | edge | azure | google | elevenlabs | gemini | openai | off
+    # auto | nvidia | edge | azure | google | elevenlabs | gemini | openai | off
+    provider: str = "auto"
     edge_voice: str = (
         "en-US-GuyNeural"  # Andrew/Brian ...MultilingualNeural, Christopher/Roger... Neural
     )
@@ -69,6 +70,9 @@ class Narration:
     gemini_voice: str = "Puck"
     elevenlabs_voice: str = "TX3LPaxmHKxFdv7VOQHJ"  # "Liam"
     openai_voice: str = "onyx"
+    # Magpie voices that take turns, one per video (Aria, Diego, Isabela, Jason, Leo, Louise,
+    # Mia, Pascal, Ray, Sofia)
+    nvidia_voices: list[str] = field(default_factory=lambda: ["Jason", "Aria", "Leo", "Mia"])
     duck_db: float = -14.0  # how far the stream audio drops under the narrator
     max_len_s: float = 3.5  # a Short has ~2s to earn the viewer; longer hooks are sped up
     # The channel's own commentary: after a clip's last line the footage rolls on, ducked, while

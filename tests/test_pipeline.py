@@ -229,6 +229,7 @@ def test_narration_provider_selection(monkeypatch):
         "GOOGLE_API_KEY",
         "Geminikey",
         "OPENAI_API_KEY",
+        "NVIDIA_API_KEY",
     ):
         monkeypatch.delenv(k, raising=False)
     assert narrate.providers(cfg) == ["edge"]  # no key needed
@@ -1620,3 +1621,23 @@ def test_nvidia_is_first_choice_and_falls_back_to_gemini(tmp_path, monkeypatch):
     monkeypatch.delenv("Geminikey", raising=False)
     with pytest.raises(RuntimeError, match="429"):
         rank._call_nvidia("hi", None)
+
+
+def test_nvidia_voices_take_turns_one_per_video(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.narration.provider = "auto"
+    monkeypatch.setenv("NVIDIA_API_KEY", "n")
+    assert narrate.providers(cfg)[:2] == ["nvidia", "edge"]  # edge stays as the backup
+    # every line of one video is the same voice, whether an explainer's segments or a clip's
+    # hook and take
+    a = [
+        narrate.nvidia_voice(cfg, tmp_path / "vid-a" / "segments" / f"{i:02d}.voice.m4a")
+        for i in range(4)
+    ]
+    assert len(set(a)) == 1 and a[0].startswith("Magpie-Multilingual.EN-US.")
+    assert narrate.nvidia_voice(cfg, tmp_path / "c1.voice.m4a") == narrate.nvidia_voice(
+        cfg, tmp_path / "c1.take.m4a"
+    )
+    # and across videos every configured voice gets used
+    used = {narrate.nvidia_voice(cfg, tmp_path / f"clip{i}.voice.m4a") for i in range(40)}
+    assert used == {f"Magpie-Multilingual.EN-US.{v}" for v in cfg.narration.nvidia_voices}

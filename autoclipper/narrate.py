@@ -5,6 +5,8 @@ mixed over the first seconds of the clip with the stream audio ducked underneath
 
 Providers (config `narration.provider`; `auto` tries them in this order and moves on to the
 next one when a call fails, e.g. the endpoint being down or a monthly quota running out):
+  nvidia     : NVIDIA_API_KEY      (Magpie TTS on build.nvidia.com, free; a different voice from
+               narration.nvidia_voices for each video, the same one throughout a video)
   edge       : no key at all - the Microsoft neural voices (Andrew, Brian, Guy, ...) through the
                endpoint Edge's read-aloud uses (unofficial, hence the fallbacks below)
   azure      : AZURE_SPEECH_KEY + AZURE_SPEECH_REGION (same voices, official; 500k chars/month free)
@@ -26,6 +28,8 @@ import logging
 import os
 import re
 import subprocess
+import time
+import zlib
 from pathlib import Path
 
 import requests
@@ -35,7 +39,7 @@ from .ingest import Word
 
 log = logging.getLogger(__name__)
 
-PROVIDERS = ("edge", "azure", "google", "elevenlabs", "gemini", "openai")
+PROVIDERS = ("nvidia", "edge", "azure", "google", "elevenlabs", "gemini", "openai")
 
 # lower stability + higher style = more expressive, "hyped" delivery (still Liam)
 _VOICE_SETTINGS = {
@@ -83,6 +87,7 @@ _KEYS = {
     "google": _google_key,
     "elevenlabs": _elevenlabs_key,
     "gemini": _gemini_key,
+    "nvidia": lambda: os.getenv("NVIDIA_API_KEY"),
     "openai": lambda: os.getenv("OPENAI_API_KEY"),
 }
 
@@ -399,6 +404,50 @@ def synthesize_timed(text: str, cfg: Config, out: Path) -> tuple[Path, list[Word
     return None
 
 
+NVIDIA_TTS_URL = "https://877104f7-e885-42b9-8de8-f6e4c6303969.invocation.api.nvcf.nvidia.com"
+
+
+def nvidia_voice(cfg: Config, out: Path) -> str:
+    """The voice for the video `out` belongs to: every line of one video gets the same voice,
+    different videos get different ones."""
+    voices = cfg.narration.nvidia_voices or ["Aria"]
+    video = out.parent.parent.name if out.parent.name == "segments" else out.name.split(".")[0]
+    name = voices[zlib.crc32(video.encode()) % len(voices)]
+    return name if "." in name else f"Magpie-Multilingual.EN-US.{name}"
+
+
+def tts_nvidia(text: str, voice: str, out: Path) -> Path:
+    r = None
+    for attempt in range(3):
+        r = requests.post(
+            f"{NVIDIA_TTS_URL}/v1/audio/synthesize",
+            headers={"Authorization": f"Bearer {os.getenv('NVIDIA_API_KEY')}"},
+            files={
+                "text": (None, text),
+                "language": (None, "en-US"),
+                "voice": (None, voice),
+                "encoding": (None, "LINEAR_PCM"),
+                "sample_rate_hz": (None, "44100"),
+            },
+            timeout=120,
+        )
+        if r.status_code not in (429, 500, 502, 503, 504):
+            break
+        time.sleep(5 * (attempt + 1))
+    r.raise_for_status()
+    if r.content[:4] != b"RIFF":
+        raise RuntimeError(f"nvidia tts returned no audio: {r.content[:120]!r}")
+    wav = out.with_suffix(".wav")
+    wav.write_bytes(r.content)
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(wav), "-c:a", "aac", "-b:a", "160k"]
+        + [str(out)],
+        check=True,
+    )
+    wav.unlink(missing_ok=True)
+    return out
+
+
 def tts_openai(text: str, voice: str, out: Path) -> Path:
     from openai import OpenAI
 
@@ -419,6 +468,8 @@ def _tts(provider: str, text: str, cfg: Config, out: Path) -> Path:
         return tts_elevenlabs(text, n.elevenlabs_voice, out)
     if provider == "gemini":
         return tts_gemini(text, n.gemini_voice, out)
+    if provider == "nvidia":
+        return tts_nvidia(text, nvidia_voice(cfg, out), out)
     if provider == "openai":
         return tts_openai(text, n.openai_voice, out)
     if provider == "edge":
