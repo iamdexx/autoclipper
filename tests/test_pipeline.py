@@ -627,6 +627,41 @@ def test_publish_youtube_body_schedules_private_until_publish_at(tmp_path, monke
     assert "at" not in res
 
 
+def test_publish_youtube_skips_a_title_already_on_the_channel(tmp_path, monkeypatch):
+    # a run that could not save its state forgets its post; the next one must not upload it again
+    from autoclipper import publish
+
+    inserts = []
+
+    class Call:
+        def __init__(self, out):
+            self.out = out
+
+        def execute(self):
+            return self.out
+
+    class YT:
+        def channels(self):
+            ch = {"items": [{"contentDetails": {"relatedPlaylists": {"uploads": "UU1"}}}]}
+            return type("C", (), {"list": lambda s, **k: Call(ch)})()
+
+        def playlistItems(self):
+            items = [{"snippet": {"title": "Old one", "resourceId": {"videoId": "old"}}},
+                     {"snippet": {"title": "Train for the Dead", "resourceId": {"videoId": "v9"}}}]  # fmt: skip
+            return type("P", (), {"list": lambda s, **k: Call({"items": items})})()
+
+        def videos(self):
+            return type("V", (), {"insert": lambda s, **k: inserts.append(k)})()
+
+    monkeypatch.setattr(publish, "youtube_auth", lambda interactive=True, manual=False: None)
+    monkeypatch.setattr("googleapiclient.discovery.build", lambda *a, **k: YT())
+    monkeypatch.setattr("googleapiclient.http.MediaFileUpload", lambda *a, **k: object())
+    (tmp_path / "v.mp4").write_bytes(b"x")
+    res = publish.publish_youtube(tmp_path / "v.mp4", "Train for the Dead", "d", [])
+    assert res == {"id": "v9", "url": "https://youtube.com/shorts/v9", "duplicate": True}
+    assert inserts == []
+
+
 def test_config_goes_live_on_youtube_only():
     cfg = Config.load(ROOT / "config.yaml")
     p = cfg.publishing
