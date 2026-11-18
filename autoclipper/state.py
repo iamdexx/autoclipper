@@ -55,7 +55,12 @@ class State:
             self.save()
 
     def record_post(self, video_id: str, clip: str, platform: str, result: dict, **about) -> None:
-        """`about` (creator / hashtags / kind / hook) is what analytics groups performance by."""
+        """`about` (creator / hashtags / kind / hook) is what analytics groups performance by.
+        A post already recorded (same platform and id) is not counted twice."""
+        if result.get("id") and any(
+            p["platform"] == platform and p.get("id") == result["id"] for p in self.data["posts"]
+        ):
+            return
         self.data["posts"].append(
             {
                 "video": video_id,
