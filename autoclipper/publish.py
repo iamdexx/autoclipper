@@ -88,6 +88,24 @@ def youtube_auth(interactive: bool = True, manual: bool = False):
     return creds
 
 
+def _existing_upload(yt, title: str) -> str:
+    """Id of one of the channel's 50 latest uploads (private and scheduled included) titled
+    `title`, else "". A run whose state cache was not saved forgets what it posted; this keeps the
+    next run from uploading the same video again. 2 quota units; a failed lookup returns ""."""
+    try:
+        ch = yt.channels().list(part="contentDetails", mine=True).execute()
+        uploads = ch["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
+        res = yt.playlistItems().list(part="snippet", playlistId=uploads, maxResults=50).execute()
+    except Exception as e:
+        log.warning("youtube: could not list recent uploads (%s)", e)
+        return ""
+    for it in res.get("items", []):
+        sn = it.get("snippet", {})
+        if sn.get("title", "").strip() == title.strip():
+            return sn.get("resourceId", {}).get("videoId", "")
+    return ""
+
+
 def publish_youtube(
     video: Path,
     title: str,
@@ -103,6 +121,9 @@ def publish_youtube(
     from googleapiclient.http import MediaFileUpload
 
     yt = build("youtube", "v3", credentials=youtube_auth(interactive=False))
+    if dup := _existing_upload(yt, title[:100]):
+        log.warning("youtube: %r is already on the channel as %s; not uploading again", title, dup)
+        return {"id": dup, "url": f"https://youtube.com/shorts/{dup}", "duplicate": True}
     status: dict = {
         "privacyStatus": os.getenv("YT_PRIVACY", "public"),
         "selfDeclaredMadeForKids": False,
