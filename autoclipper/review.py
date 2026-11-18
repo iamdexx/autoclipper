@@ -103,14 +103,34 @@ def frames(video: Path, n: int, width: int = 360) -> list[bytes]:
 
 
 def _ask(prompt: str, pics: list[bytes], cfg: Config) -> dict:
-    if not rank._gemini_key():
-        raise RuntimeError("no vision model configured (needs a Gemini key)")
+    provider = rank._pick_provider(cfg)
+    if provider == "nvidia" and rank._nvidia_key():
+        vision = "nvidia"
+    elif rank._gemini_key():
+        vision = "gemini"
+    elif rank._nvidia_key():
+        vision = "nvidia"
+    else:
+        raise RuntimeError("no vision model configured (needs an NVIDIA or Gemini key)")
     if not pics:
         raise RuntimeError("no frames could be read")
-    # llm_model names a model of the configured provider, which need not be Gemini
-    model = cfg.llm_model if rank._pick_provider(cfg) == "gemini" else None
-    raw = rank._call_gemini(prompt, model, images=pics)
-    return json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
+
+    def ask() -> str:
+        if vision == "nvidia":
+            # llm_model names the text model; the review needs one that takes images
+            return rank._call_nvidia(prompt, None, images=pics)
+        # llm_model names a model of the configured provider, which need not be Gemini
+        model = cfg.llm_model if provider == "gemini" else None
+        return rank._call_gemini(prompt, model, images=pics)
+
+    for last in (False, False, True):
+        raw = ask()
+        try:
+            return json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
+        except (AttributeError, ValueError) as e:
+            if last:
+                raise
+            log.warning("review answer was not valid JSON (%s); asking again", e)
 
 
 def source(video: Path, title: str, channel: str, said: str, cfg: Config) -> Verdict:

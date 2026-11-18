@@ -1558,3 +1558,65 @@ def test_own_scripted_video_is_not_pruned_for_being_off_focus(tmp_path):
         f.write_bytes(b"x")
         queue.enqueue(f, kind, name, 5.0, metadata.PostMeta(title, "d", [], ""), cfg)
     assert [it.video for it in queue.prune(cfg)] == ["ice.mp4"]
+
+
+def test_nvidia_is_first_choice_and_falls_back_to_gemini(tmp_path, monkeypatch):
+    from autoclipper import review
+
+    cfg = _cfg(tmp_path)
+    cfg.llm_provider = "auto"
+    monkeypatch.setattr(rank, "NVIDIA_MIN_GAP_S", 0)
+    monkeypatch.setattr(rank.time, "sleep", lambda s: None)
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    assert rank._pick_provider(cfg) == "gemini"
+    monkeypatch.setenv("NVIDIA_API_KEY", "n")
+    assert rank._pick_provider(cfg) == "nvidia"
+
+    class R:
+        def __init__(self, code, text=""):
+            self.status_code, self.text = code, text
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": self.text}}]}
+
+    sent = []
+
+    def post(model, content, timeout=240):
+        sent.append((model, content))
+        return R(200, "ok")
+
+    monkeypatch.setattr(rank, "_nvidia_post", post)
+    assert rank._call_nvidia("hi", None) == "ok"
+    assert sent[-1] == (rank.NVIDIA_MODELS[0], "hi")
+    # images go to a model that can see them, ahead of the text
+    assert rank._call_nvidia("look", None, images=[b"jpg"]) == "ok"
+    model, content = sent[-1]
+    assert model == rank.NVIDIA_VISION_MODELS[0]
+    assert [c["type"] for c in content] == ["image_url", "text"]
+
+    monkeypatch.setattr(review, "frames", lambda *a, **k: [b"jpg"])
+    monkeypatch.setattr(rank, "_nvidia_post", lambda m, c, timeout=240: R(200, '{"score": 9}'))
+    assert review._ask("p", [b"jpg"], cfg) == {"score": 9}
+    answers = ['{"note": unquoted}', '{"score": 7}']  # broken JSON is asked again
+    monkeypatch.setattr(rank, "_nvidia_post", lambda m, c, timeout=240: R(200, answers.pop(0)))
+    assert review._ask("p", [b"jpg"], cfg) == {"score": 7}
+
+    # NVIDIA refusing every request: Gemini answers instead
+    monkeypatch.setattr(rank, "_nvidia_post", lambda m, c, timeout=240: R(429, "slow down"))
+    monkeypatch.setattr(rank, "_call_gemini", lambda p, m, images=None: "from gemini")
+    assert rank._call_nvidia("hi", None) == "from gemini"
+    # so does a refused key, without the waits
+    slept = []
+    monkeypatch.setattr(rank.time, "sleep", slept.append)
+    monkeypatch.setattr(rank, "_nvidia_post", lambda m, c, timeout=240: R(401, "bad key"))
+    assert rank._call_nvidia("hi", None) == "from gemini" and slept == []
+    monkeypatch.setattr(rank, "_nvidia_post", lambda m, c, timeout=240: R(429, "slow down"))
+    monkeypatch.delenv("GEMINI_API_KEY")
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.delenv("Geminikey", raising=False)
+    with pytest.raises(RuntimeError, match="429"):
+        rank._call_nvidia("hi", None)

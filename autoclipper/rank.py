@@ -1,6 +1,6 @@
 """Pick the moments in a transcript most likely to perform as short-form clips.
 
-Provider order for `llm_provider: auto`: Gemini -> Anthropic -> OpenAI -> heuristic,
+Provider order for `llm_provider: auto`: NVIDIA -> Gemini -> Anthropic -> OpenAI -> heuristic,
 based on which API key is present in the environment.
 """
 
@@ -172,10 +172,16 @@ def _gemini_key() -> str | None:
     return None
 
 
+def _nvidia_key() -> str | None:
+    return os.getenv("NVIDIA_API_KEY") or None
+
+
 def _pick_provider(cfg: Config) -> str:
     p = cfg.llm_provider
     if p != "auto":
         return p
+    if _nvidia_key():
+        return "nvidia"
     if _gemini_key():
         return "gemini"
     if os.getenv("ANTHROPIC_API_KEY"):
@@ -223,6 +229,82 @@ def _call_gemini(prompt: str, model: str | None, images: list[bytes] | None = No
             return "".join(p.get("text", "") for p in parts)
         time.sleep(5 * (attempt + 1))
     raise last or RuntimeError("gemini unavailable")
+
+
+# build.nvidia.com: free, but it refuses bursts, so calls are spaced out. Only the VL models
+# take images.
+NVIDIA_MODELS = ["nvidia/nemotron-3-ultra-550b-a55b", "nvidia/nemotron-3.5-lightning-30b-a3b"]
+NVIDIA_VISION_MODELS = [
+    "nvidia/nemotron-3.5-super-vl-120b-a12b",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+]
+NVIDIA_MIN_GAP_S = 2.0
+_nvidia_last = 0.0
+
+
+def _nvidia_post(model: str, content, timeout: float = 240):
+    import requests
+
+    global _nvidia_last
+    wait = _nvidia_last + NVIDIA_MIN_GAP_S - time.monotonic()
+    if wait > 0:
+        time.sleep(wait)
+    try:
+        return requests.post(
+            "https://integrate.api.nvidia.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {_nvidia_key()}"},
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": content}],
+                "temperature": 0.4,
+                "max_tokens": 8000,
+            },
+            timeout=timeout,
+        )
+    finally:
+        _nvidia_last = time.monotonic()
+
+
+def _call_nvidia(prompt: str, model: str | None, images: list[bytes] | None = None) -> str:
+    """`images`: JPEGs sent along with the prompt, in order. Falls back to Gemini (when a key
+    is set) if NVIDIA stays unavailable."""
+    import requests
+
+    models = [model] if model else (NVIDIA_VISION_MODELS if images else NVIDIA_MODELS)
+    content: str | list = prompt
+    if images:
+        content = [
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(b).decode()},
+            }
+            for b in images
+        ] + [{"type": "text", "text": prompt}]
+    last: Exception | None = None
+    r = None
+    for attempt in range(3):
+        for m in models:
+            try:
+                r = _nvidia_post(m, content)
+            except requests.RequestException as e:
+                last = RuntimeError(f"nvidia {m}: {e}")
+                log.warning("%s - trying next model", last)
+                continue
+            if r.status_code != 200:
+                last = RuntimeError(f"nvidia {m} {r.status_code}: {r.text[:200]}")
+                log.warning("%s - trying next model", last)
+                continue
+            text = r.json()["choices"][0]["message"].get("content") or ""
+            if text.strip():
+                return text
+            last = RuntimeError(f"nvidia {m}: empty answer")
+        if r is not None and r.status_code in (401, 403, 404):
+            break  # the key or the model is refused: waiting will not help
+        time.sleep(15 * (attempt + 1))
+    if _gemini_key():
+        log.warning("nvidia unavailable (%s); using gemini", last)
+        return _call_gemini(prompt, None, images) if images else _call_gemini(prompt, None)
+    raise last or RuntimeError("nvidia unavailable")
 
 
 def _call_anthropic(prompt: str, model: str | None) -> str:
@@ -286,7 +368,12 @@ def rank_llm(segments: list[Segment], cfg: Config, creator: str, provider: str) 
         max_len=int(cfg.clips.max_len_s),
         transcript=_transcript_text(segments),
     )
-    call = {"gemini": _call_gemini, "anthropic": _call_anthropic, "openai": _call_openai}[provider]
+    call = {
+        "nvidia": _call_nvidia,
+        "gemini": _call_gemini,
+        "anthropic": _call_anthropic,
+        "openai": _call_openai,
+    }[provider]
     raw = call(prompt, cfg.llm_model)
     items = _parse_json_array(raw)
     moments = []
