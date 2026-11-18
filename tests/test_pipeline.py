@@ -1675,6 +1675,7 @@ def test_explainer_photo_must_fit_its_line(tmp_path, monkeypatch):
     monkeypatch.setattr(images, "matches", lambda q, t: True)
     monkeypatch.setattr(images, "photo", lambda t: True)
     monkeypatch.setattr(images, "_download", lambda url, out: bool(out.write_text(url)))
+    monkeypatch.setattr(images, "is_image", lambda p: True)
     shown = []
     ok = {"u2"}
 
@@ -1684,6 +1685,9 @@ def test_explainer_photo_must_fit_its_line(tmp_path, monkeypatch):
 
     got = images.fetch("majora mask", "Majora", tmp_path / "a", thumbs=False, accept=accept)
     assert got.read_text() == "u2" and shown == ["u0", "u1", "u2"]  # refused ones are skipped
+    shown.clear()  # a cached photo is checked too, and replaced when it no longer fits
+    assert images.fetch("majora mask", "Majora", tmp_path / "a", thumbs=False, accept=accept)
+    assert shown == ["u2"]
     ok.clear()
     shown.clear()
     assert images.fetch("x", "y", tmp_path / "b", thumbs=False, accept=accept) is None

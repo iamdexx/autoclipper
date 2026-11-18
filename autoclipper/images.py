@@ -163,7 +163,10 @@ def fetch(
     key = hashlib.sha1(f"{name}|{query}".encode()).hexdigest()[:8]
     out = dest / f"{key}.jpg"
     if out.exists() and is_image(out):
-        return out
+        if accept is None or accept(out):
+            return out
+        looks += 1  # a cached photo is checked against this line like any other
+        out.unlink()
     for source in (commons, youtube_thumbs) if thumbs else (wikipedia_lead, commons):
         try:
             cands = source(query)
