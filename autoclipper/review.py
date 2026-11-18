@@ -133,6 +133,28 @@ def _ask(prompt: str, pics: list[bytes], cfg: Config) -> dict:
             log.warning("review answer was not valid JSON (%s); asking again", e)
 
 
+PHOTO_PROMPT = """This picture will fill the screen of a short video while the narrator says:
+"{line}"
+The picture was searched for as: {name}.
+Does the picture show what the narrator is talking about, so a viewer would not be confused?
+A picture of something else (a different object, place, person, game or product), a logo, a
+diagram, a screenshot of text or an article, or a picture carrying a watermark is a "no".
+Return JSON only: {{"shows": "<what the picture shows, a few words>", "fits": true|false}}"""
+
+
+def photo(path: Path, line: str, name: str, cfg: Config) -> bool:
+    """Does this photo fit the line it is shown over? True when the check could not run, so an
+    outage does not stop every explainer (the finished video is still reviewed)."""
+    try:
+        j = _ask(PHOTO_PROMPT.format(line=line[:400], name=name), [path.read_bytes()], cfg)
+    except Exception as e:
+        log.warning("photo check could not run (%s)", e)
+        return True
+    fits = j.get("fits") is not False
+    log.info("photo for %r %s: %s", name, "fits" if fits else "does NOT fit", j.get("shows"))
+    return fits
+
+
 def source(video: Path, title: str, channel: str, said: str, cfg: Config) -> Verdict:
     """Is this a video worth cutting from: a real person talking in English, with a clean
     picture? ok=None when the check could not be run."""
