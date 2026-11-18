@@ -1641,3 +1641,25 @@ def test_nvidia_voices_take_turns_one_per_video(tmp_path, monkeypatch):
     # and across videos every configured voice gets used
     used = {narrate.nvidia_voice(cfg, tmp_path / f"clip{i}.voice.m4a") for i in range(40)}
     assert used == {f"Magpie-Multilingual.EN-US.{v}" for v in cfg.narration.nvidia_voices}
+
+
+def test_nvidia_tts_without_audio_is_a_failure_and_does_not_wait_after_the_last_try(
+    tmp_path, monkeypatch
+):
+    class R:
+        def __init__(self, code, content=b""):
+            self.status_code, self.content = code, content
+
+        def raise_for_status(self):
+            if self.status_code != 200:
+                raise RuntimeError(f"http {self.status_code}")
+
+    slept = []
+    monkeypatch.setattr(narrate.time, "sleep", slept.append)
+    monkeypatch.setattr(narrate.requests, "post", lambda *a, **k: R(200, b"RIFF" + b"\0" * 40))
+    with pytest.raises(RuntimeError, match="no audio"):  # a header with no samples
+        narrate.tts_nvidia("hi", "v", tmp_path / "a.m4a")
+    monkeypatch.setattr(narrate.requests, "post", lambda *a, **k: R(503))
+    with pytest.raises(RuntimeError, match="503"):
+        narrate.tts_nvidia("hi", "v", tmp_path / "a.m4a")
+    assert slept == [5, 10]  # nothing to wait for after the third refusal

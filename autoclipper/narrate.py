@@ -431,11 +431,11 @@ def tts_nvidia(text: str, voice: str, out: Path) -> Path:
             },
             timeout=120,
         )
-        if r.status_code not in (429, 500, 502, 503, 504):
+        if r.status_code not in (429, 500, 502, 503, 504) or attempt == 2:
             break
         time.sleep(5 * (attempt + 1))
     r.raise_for_status()
-    if r.content[:4] != b"RIFF":
+    if r.content[:4] != b"RIFF" or len(r.content) < 4096:  # 4096 bytes = 46ms: no speech
         raise RuntimeError(f"nvidia tts returned no audio: {r.content[:120]!r}")
     wav = out.with_suffix(".wav")
     wav.write_bytes(r.content)
