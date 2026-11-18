@@ -1549,6 +1549,12 @@ def test_nvidia_is_first_choice_and_falls_back_to_gemini(tmp_path, monkeypatch):
     monkeypatch.setattr(rank, "_nvidia_post", lambda m, c, timeout=240: R(429, "slow down"))
     monkeypatch.setattr(rank, "_call_gemini", lambda p, m, images=None: "from gemini")
     assert rank._call_nvidia("hi", None) == "from gemini"
+    # so does a refused key, without the waits
+    slept = []
+    monkeypatch.setattr(rank.time, "sleep", slept.append)
+    monkeypatch.setattr(rank, "_nvidia_post", lambda m, c, timeout=240: R(401, "bad key"))
+    assert rank._call_nvidia("hi", None) == "from gemini" and slept == []
+    monkeypatch.setattr(rank, "_nvidia_post", lambda m, c, timeout=240: R(429, "slow down"))
     monkeypatch.delenv("GEMINI_API_KEY")
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.delenv("Geminikey", raising=False)

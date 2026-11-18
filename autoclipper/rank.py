@@ -281,6 +281,7 @@ def _call_nvidia(prompt: str, model: str | None, images: list[bytes] | None = No
             for b in images
         ] + [{"type": "text", "text": prompt}]
     last: Exception | None = None
+    r = None
     for attempt in range(3):
         for m in models:
             try:
@@ -289,15 +290,16 @@ def _call_nvidia(prompt: str, model: str | None, images: list[bytes] | None = No
                 last = RuntimeError(f"nvidia {m}: {e}")
                 log.warning("%s - trying next model", last)
                 continue
-            if r.status_code in (429, 500, 502, 503, 504):
+            if r.status_code != 200:
                 last = RuntimeError(f"nvidia {m} {r.status_code}: {r.text[:200]}")
                 log.warning("%s - trying next model", last)
                 continue
-            r.raise_for_status()
             text = r.json()["choices"][0]["message"].get("content") or ""
             if text.strip():
                 return text
             last = RuntimeError(f"nvidia {m}: empty answer")
+        if r is not None and r.status_code in (401, 403, 404):
+            break  # the key or the model is refused: waiting will not help
         time.sleep(15 * (attempt + 1))
     if _gemini_key():
         log.warning("nvidia unavailable (%s); using gemini", last)
