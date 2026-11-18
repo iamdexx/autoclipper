@@ -286,6 +286,7 @@ def _llm(prompt: str, cfg: Config) -> str:
     if provider == "heuristic":
         raise RuntimeError("no LLM key configured")
     call = {
+        "nvidia": rank._call_nvidia,
         "gemini": rank._call_gemini,
         "anthropic": rank._call_anthropic,
         "openai": rank._call_openai,

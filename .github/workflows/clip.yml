@@ -51,6 +51,7 @@ jobs:
           restore-keys: autoclipper-state-
       - run: autoclipper run
         env:
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY || secrets.Nvidiakey }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.Geminikey }}
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
           YT_PROXY: ${{ secrets.YT_PROXY }}

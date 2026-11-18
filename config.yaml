@@ -15,7 +15,7 @@ creators:
 
 workdir: data
 whisper_model: base          # tiny/base/small/medium — bigger = better captions, slower
-llm_provider: auto           # auto | gemini | anthropic | openai | heuristic
+llm_provider: auto           # auto | nvidia | gemini | anthropic | openai | heuristic
 poll_interval_s: 900
 max_videos_per_run: 2
 

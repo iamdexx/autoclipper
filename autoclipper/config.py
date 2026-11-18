@@ -247,7 +247,7 @@ class Config:
     workdir: Path = Path("data")
     whisper_model: str = "base"
     whisper_compute: str = "int8"
-    llm_provider: str = "auto"  # auto | anthropic | openai | heuristic
+    llm_provider: str = "auto"  # auto | nvidia | gemini | anthropic | openai | heuristic
     llm_model: str | None = None
     clips: ClipRules = field(default_factory=ClipRules)
     captions: CaptionStyle = field(default_factory=CaptionStyle)
