@@ -1492,7 +1492,7 @@ def test_explainer_is_built_from_photos_with_its_title_and_never_thumbnails(tmp_
     cfg.top10.style, cfg.top10.music, cfg.verify.min_entries = "explainer", "off", 3
     asked, shown = [], []
 
-    def fetch(query, name, dest, thumbs=True, accept=None):
+    def fetch(query, name, dest, thumbs=True, accept=None, beat=""):
         asked.append(thumbs)
         return tmp_path / f"{name}.jpg"
 
@@ -1688,6 +1688,13 @@ def test_explainer_photo_must_fit_its_line(tmp_path, monkeypatch):
     shown.clear()  # a cached photo is checked too, and replaced when it no longer fits
     assert images.fetch("majora mask", "Majora", tmp_path / "a", thumbs=False, accept=accept)
     assert shown == ["u2"]
+    # another beat with the same name and query gets its own file, so refusing a photo for it
+    # cannot take the first beat's photo away
+    ok.add("u0")
+    other = images.fetch(
+        "majora mask", "Majora", tmp_path / "a", thumbs=False, accept=accept, beat="line 2"
+    )
+    assert other != got and other.read_text() == "u0" and got.read_text() == "u2"
     ok.clear()
     shown.clear()
     assert images.fetch("x", "y", tmp_path / "b", thumbs=False, accept=accept) is None

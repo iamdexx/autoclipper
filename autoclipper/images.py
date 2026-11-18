@@ -154,13 +154,15 @@ def fetch(
     dest: Path,
     thumbs: bool = True,
     accept: Callable[[Path], bool] | None = None,
+    beat: str = "",
 ) -> Path | None:
     """One relevant image for `query` (entry `name` also counts as a match), cached on disk.
     `thumbs=False`: real photos only, never a YouTube thumbnail. `accept`: looks at a
-    downloaded candidate and says whether it may be used; a refused one is skipped."""
+    downloaded candidate and says whether it may be used; a refused one is skipped. `beat`: what the image is
+    shown over, when two beats with the same name and query must not share (and replace) a file."""
     looks = 0
     dest.mkdir(parents=True, exist_ok=True)
-    key = hashlib.sha1(f"{name}|{query}".encode()).hexdigest()[:8]
+    key = hashlib.sha1(f"{name}|{query}{beat and '|' + beat}".encode()).hexdigest()[:8]
     out = dest / f"{key}.jpg"
     if out.exists() and is_image(out):
         if accept is None or accept(out):

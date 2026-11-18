@@ -439,7 +439,14 @@ def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
         fits = None
         if story and cfg.review.enabled:  # each photo has to show what its line says
             fits = functools.partial(review.photo, line=e.line, name=e.name, cfg=cfg)
-        p = images.fetch(e.query, e.name, vdir / "images", thumbs=not story, accept=fits)
+        p = images.fetch(
+            e.query,
+            e.name,
+            vdir / "images",
+            thumbs=not story,
+            accept=fits,
+            beat=e.line if fits else "",
+        )
         if p is None:
             log.warning("no image for #%d %s; dropping it", e.rank, e.name)
         else:
