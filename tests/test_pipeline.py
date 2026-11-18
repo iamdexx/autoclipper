@@ -651,15 +651,37 @@ def test_publish_youtube_skips_a_title_already_on_the_channel(tmp_path, monkeypa
             return type("P", (), {"list": lambda s, **k: Call({"items": items})})()
 
         def videos(self):
-            return type("V", (), {"insert": lambda s, **k: inserts.append(k)})()
+            st = {"items": [{"status": {"publishAt": "2026-11-18T20:30:00Z"}}]}
+            return type(
+                "V",
+                (),
+                {"insert": lambda s, **k: inserts.append(k), "list": lambda s, **k: Call(st)},
+            )()
 
     monkeypatch.setattr(publish, "youtube_auth", lambda interactive=True, manual=False: None)
     monkeypatch.setattr("googleapiclient.discovery.build", lambda *a, **k: YT())
     monkeypatch.setattr("googleapiclient.http.MediaFileUpload", lambda *a, **k: object())
     (tmp_path / "v.mp4").write_bytes(b"x")
     res = publish.publish_youtube(tmp_path / "v.mp4", "Train for the Dead", "d", [])
-    assert res == {"id": "v9", "url": "https://youtube.com/shorts/v9", "duplicate": True}
+    # `at` is the scheduled go-live time already on YouTube, so the budget keeps that slot
+    assert res == {
+        "id": "v9",
+        "url": "https://youtube.com/shorts/v9",
+        "duplicate": True,
+        "at": 1795033800.0,
+    }
     assert inserts == []
+
+
+def test_record_post_does_not_count_the_same_upload_twice(tmp_path):
+    from autoclipper.state import State
+
+    st = State(tmp_path / "state.json")
+    st.record_post("src", "c.mp4", "youtube", {"id": "v9", "at": 100.0})
+    st.record_post("src", "c.mp4", "youtube", {"id": "v9", "duplicate": True, "at": 100.0})
+    st.record_post("src", "c.mp4", "youtube", {"skipped": "budget"})
+    st.record_post("src", "c.mp4", "youtube", {"skipped": "budget"})
+    assert [p.get("id") for p in st.data["posts"]] == ["v9", None, None]
 
 
 def test_config_goes_live_on_youtube_only():

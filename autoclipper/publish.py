@@ -22,6 +22,7 @@ import secrets
 import shutil
 import time
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -88,22 +89,40 @@ def youtube_auth(interactive: bool = True, manual: bool = False):
     return creds
 
 
-def _existing_upload(yt, title: str) -> str:
-    """Id of one of the channel's 50 latest uploads (private and scheduled included) titled
-    `title`, else "". A run whose state cache was not saved forgets what it posted; this keeps the
-    next run from uploading the same video again. 2 quota units; a failed lookup returns ""."""
+def _existing_upload(yt, title: str) -> tuple[str, float | None]:
+    """(id, when it went or goes live) of one of the channel's 50 latest uploads (private and
+    scheduled included) titled `title`, else ("", None). A run whose state cache was not saved
+    forgets what it posted; this keeps the next run from uploading the same video again.
+    3 quota units; a failed lookup returns ("", None)."""
     try:
         ch = yt.channels().list(part="contentDetails", mine=True).execute()
         uploads = ch["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
         res = yt.playlistItems().list(part="snippet", playlistId=uploads, maxResults=50).execute()
     except Exception as e:
         log.warning("youtube: could not list recent uploads (%s)", e)
-        return ""
+        return "", None
     for it in res.get("items", []):
         sn = it.get("snippet", {})
-        if sn.get("title", "").strip() == title.strip():
-            return sn.get("resourceId", {}).get("videoId", "")
-    return ""
+        if sn.get("title", "").strip() != title.strip():
+            continue
+        vid = sn.get("resourceId", {}).get("videoId", "")
+        when = sn.get("publishedAt")
+        try:  # a scheduled video goes live at status.publishAt, which spaces the posting budget
+            v = yt.videos().list(part="status", id=vid).execute().get("items", [])
+            when = (v[0].get("status", {}).get("publishAt") if v else None) or when
+        except Exception as e:
+            log.warning("youtube: could not read the schedule of %s (%s)", vid, e)
+        return vid, _epoch(when)
+    return "", None
+
+
+def _epoch(rfc3339: str | None) -> float | None:
+    if not rfc3339:
+        return None
+    try:
+        return datetime.fromisoformat(rfc3339.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
 
 
 def publish_youtube(
@@ -121,9 +140,13 @@ def publish_youtube(
     from googleapiclient.http import MediaFileUpload
 
     yt = build("youtube", "v3", credentials=youtube_auth(interactive=False))
-    if dup := _existing_upload(yt, title[:100]):
+    dup, live_at = _existing_upload(yt, title[:100])
+    if dup:
         log.warning("youtube: %r is already on the channel as %s; not uploading again", title, dup)
-        return {"id": dup, "url": f"https://youtube.com/shorts/{dup}", "duplicate": True}
+        out = {"id": dup, "url": f"https://youtube.com/shorts/{dup}", "duplicate": True}
+        if live_at is not None:
+            out["at"] = live_at
+        return out
     status: dict = {
         "privacyStatus": os.getenv("YT_PRIVACY", "public"),
         "selfDeclaredMadeForKids": False,
