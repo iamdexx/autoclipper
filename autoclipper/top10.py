@@ -4,6 +4,7 @@ one vertical video with a big rank badge, entry title and word-highlight caption
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import logging
@@ -12,7 +13,7 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from . import images, ingest, narrate, render, sfx, slop, trends, verify
+from . import images, ingest, narrate, render, review, sfx, slop, trends, verify
 from .config import Config
 from .ingest import Word
 
@@ -435,7 +436,17 @@ def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
 
     pics: dict[int, Path] = {}
     for e in script.entries:
-        p = images.fetch(e.query, e.name, vdir / "images", thumbs=not story)
+        fits = None
+        if story and cfg.review.enabled:  # each photo has to show what its line says
+            fits = functools.partial(review.photo, line=e.line, name=e.name, cfg=cfg)
+        p = images.fetch(
+            e.query,
+            e.name,
+            vdir / "images",
+            thumbs=not story,
+            accept=fits,
+            beat=e.line if fits else "",
+        )
         if p is None:
             log.warning("no image for #%d %s; dropping it", e.rank, e.name)
         else:

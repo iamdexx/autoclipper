@@ -1492,7 +1492,7 @@ def test_explainer_is_built_from_photos_with_its_title_and_never_thumbnails(tmp_
     cfg.top10.style, cfg.top10.music, cfg.verify.min_entries = "explainer", "off", 3
     asked, shown = [], []
 
-    def fetch(query, name, dest, thumbs=True):
+    def fetch(query, name, dest, thumbs=True, accept=None, beat=""):
         asked.append(thumbs)
         return tmp_path / f"{name}.jpg"
 
@@ -1663,3 +1663,52 @@ def test_nvidia_tts_without_audio_is_a_failure_and_does_not_wait_after_the_last_
     with pytest.raises(RuntimeError, match="503"):
         narrate.tts_nvidia("hi", "v", tmp_path / "a.m4a")
     assert slept == [5, 10]  # nothing to wait for after the third refusal
+
+
+def test_explainer_photo_must_fit_its_line(tmp_path, monkeypatch):
+    from autoclipper import images, review
+
+    cfg = _cfg(tmp_path)
+    cands = [(f"File:Majora mask {i}.jpg", f"u{i}") for i in range(8)]
+    monkeypatch.setattr(images, "wikipedia_lead", lambda q: [])
+    monkeypatch.setattr(images, "commons", lambda q: cands)
+    monkeypatch.setattr(images, "matches", lambda q, t: True)
+    monkeypatch.setattr(images, "photo", lambda t: True)
+    monkeypatch.setattr(images, "_download", lambda url, out: bool(out.write_text(url)))
+    monkeypatch.setattr(images, "is_image", lambda p: True)
+    shown = []
+    ok = {"u2"}
+
+    def accept(p):
+        shown.append(p.read_text())
+        return p.read_text() in ok
+
+    got = images.fetch("majora mask", "Majora", tmp_path / "a", thumbs=False, accept=accept)
+    assert got.read_text() == "u2" and shown == ["u0", "u1", "u2"]  # refused ones are skipped
+    shown.clear()  # a cached photo is checked too, and replaced when it no longer fits
+    assert images.fetch("majora mask", "Majora", tmp_path / "a", thumbs=False, accept=accept)
+    assert shown == ["u2"]
+    # another beat with the same name and query gets its own file, so refusing a photo for it
+    # cannot take the first beat's photo away
+    ok.add("u0")
+    other = images.fetch(
+        "majora mask", "Majora", tmp_path / "a", thumbs=False, accept=accept, beat="line 2"
+    )
+    assert other != got and other.read_text() == "u0" and got.read_text() == "u2"
+    ok.clear()
+    shown.clear()
+    assert images.fetch("x", "y", tmp_path / "b", thumbs=False, accept=accept) is None
+    assert len(shown) == images.MAX_LOOKS  # and it gives up instead of asking forever
+
+    pic = tmp_path / "p.jpg"
+    pic.write_bytes(b"jpg")
+    monkeypatch.setattr(
+        review, "_ask", lambda p, pics, c: {"shows": "a circuit board", "fits": False}
+    )
+    assert review.photo(pic, "The mask falls.", "Majora", cfg) is False
+
+    def down(p, pics, c):
+        raise RuntimeError("503")
+
+    monkeypatch.setattr(review, "_ask", down)
+    assert review.photo(pic, "The mask falls.", "Majora", cfg) is True  # an outage does not block

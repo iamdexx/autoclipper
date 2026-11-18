@@ -8,6 +8,7 @@ import hashlib
 import logging
 import re
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import requests
@@ -144,14 +145,30 @@ def is_image(path: Path) -> bool:
     return w >= 320 and h >= 240
 
 
-def fetch(query: str, name: str, dest: Path, thumbs: bool = True) -> Path | None:
+MAX_LOOKS = 4  # candidates shown to `accept` per image before giving up
+
+
+def fetch(
+    query: str,
+    name: str,
+    dest: Path,
+    thumbs: bool = True,
+    accept: Callable[[Path], bool] | None = None,
+    beat: str = "",
+) -> Path | None:
     """One relevant image for `query` (entry `name` also counts as a match), cached on disk.
-    `thumbs=False`: real photos only, never a YouTube thumbnail."""
+    `thumbs=False`: real photos only, never a YouTube thumbnail. `accept`: looks at a
+    downloaded candidate and says whether it may be used; a refused one is skipped. `beat`: what the image is
+    shown over, when two beats with the same name and query must not share (and replace) a file."""
+    looks = 0
     dest.mkdir(parents=True, exist_ok=True)
-    key = hashlib.sha1(f"{name}|{query}".encode()).hexdigest()[:8]
+    key = hashlib.sha1(f"{name}|{query}{beat and '|' + beat}".encode()).hexdigest()[:8]
     out = dest / f"{key}.jpg"
     if out.exists() and is_image(out):
-        return out
+        if accept is None or accept(out):
+            return out
+        looks += 1  # a cached photo is checked against this line like any other
+        out.unlink()
     for source in (commons, youtube_thumbs) if thumbs else (wikipedia_lead, commons):
         try:
             cands = source(query)
@@ -163,9 +180,18 @@ def fetch(query: str, name: str, dest: Path, thumbs: bool = True) -> Path | None
                 continue
             if not thumbs and not photo(title):
                 continue
-            if _download(url, out):
-                log.info("image for %r: %s", name, title)
-                return out
+            if not _download(url, out):
+                continue
+            if accept is not None:
+                if looks >= MAX_LOOKS:
+                    break
+                looks += 1
+                if not accept(out):
+                    log.info("image for %r refused: %s", name, title)
+                    out.unlink(missing_ok=True)
+                    continue
+            log.info("image for %r: %s", name, title)
+            return out
     if out.exists():
         out.unlink()
     return None
