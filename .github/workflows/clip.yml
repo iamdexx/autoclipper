@@ -8,7 +8,7 @@ on:
   issue_comment:
     types: [created]
 jobs:
-  # A comment-triggered run gets a read-only cache token, so it could not save data/state.json and
+  # A comment-triggered run gets a read-only cache token, so it could not save its state and
   # the next run posted the same video again. The comment therefore only dispatches a normal run.
   start:
     if: >-
