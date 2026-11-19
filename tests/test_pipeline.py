@@ -2060,9 +2060,6 @@ def test_a_handed_off_video_is_checked_and_queued_once(tmp_path, monkeypatch):
     queue.remove(cfg, other)
     (folder / "post.json").write_text(json.dumps({**post, "said": ""}))
     assert queue.handoff(folder, cfg) is None  # nothing to check the captions against
-||||||| 1e68311
-
-
 
 
 def test_letterbox_bars_are_cut_off_a_shot(tmp_path):
