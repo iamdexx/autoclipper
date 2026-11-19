@@ -158,6 +158,28 @@ def photo(path: Path, line: str, name: str, cfg: Config) -> bool:
     return fits
 
 
+BACKDROP_PROMPT = """This frame will fill the screen of a short video, behind a narrator telling a
+story about: {subject}
+Is it a clean picture of that subject (for a game: the game itself being played or one of its
+scenes)? A frame with a person in a webcam box, a channel's logo, name or @handle, captions or
+other added text, a menu, a loading or title screen, a screenshot of a post or an article, or a
+frame of something else is a "no".
+Return JSON only: {{"shows": "<what the frame shows, a few words>", "fits": true|false}}"""
+
+
+def backdrop(path: Path, subject: str, cfg: Config) -> bool:
+    """Is this video frame clean footage of the subject? False when the check could not run:
+    another channel's footage is never shown unchecked."""
+    try:
+        j = _ask(BACKDROP_PROMPT.format(subject=subject[:200]), [path.read_bytes()], cfg)
+    except Exception as e:
+        log.warning("footage check could not run (%s)", e)
+        return False
+    fits = j.get("fits") is True
+    log.info("footage frame %s: %s", "fits" if fits else "does NOT fit", j.get("shows"))
+    return fits
+
+
 # a source where this share of sampled frames is somebody's post or an article: clips cut from it
 # carry that account's name and logo, and fail the finished-video review
 MAX_SCREENSHOT_SHARE = 0.2

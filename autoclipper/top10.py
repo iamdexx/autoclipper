@@ -39,6 +39,7 @@ class Script:
     hashtags: list[str] = field(default_factory=list)
     entries: list[Entry] = field(default_factory=list)
     tease: str = ""  # ranking style: small line under the title, e.g. "the last one is insane"
+    footage: str = ""  # explainer about a game, film or show: a YouTube search for footage of it
 
 
 SCRIPT_PROMPT = """Write a viral "Top {n}" countdown short (TikTok / Reels / Shorts) about: {topic}
@@ -128,6 +129,8 @@ Narration is plain spoken words only: no emojis, hashtags, stage directions or n
 Return ONLY JSON:
 {{"title": "<the question or claim, max 9 words, Title Case>",
   "intro": "<the puzzle in one sentence, max 18 words>",
+  "footage": "<only when the story is about ONE video game, film or show: its name plus
+              'gameplay no commentary' or 'official trailer'. Otherwise an empty string>",
   "hashtags": ["#a", "#b", "#c", "#d"],
   "entries": [{{"rank": {n}, "name": "<beat label, max 4 words>",
                 "line": "<1-2 sentences, 14-26 words, one concrete fact>",
@@ -247,6 +250,7 @@ def write_script(topic: str, angle: str, cfg: Config, avoid: list[str] | None = 
         hashtags=[str(h) for h in j.get("hashtags", [])][:6],
         entries=entries[: cfg.top10.items],
         tease=str(j.get("tease", ""))[:60],
+        footage=str(j.get("footage") or "")[:80] if story else "",
     )
 
 
@@ -362,8 +366,11 @@ def has_video(path: Path) -> bool:
     return "video" in out
 
 
-def fetch_footage(entry: Entry, secs: float, dest: Path, cfg: Config) -> Path | None:
-    """Download only a `secs`-long window from the best-matching video (yt-dlp sections)."""
+def fetch_footage(
+    entry: Entry, secs: float, dest: Path, cfg: Config, max_s: float = 0
+) -> Path | None:
+    """Download only a `secs`-long window from the best-matching video (yt-dlp sections).
+    `max_s`: the longest video to take it from (default: top10.source_max_duration_s)."""
     key = hashlib.sha1(f"{entry.name}|{entry.query}".encode()).hexdigest()[:8]
     out = dest / f"{entry.rank:02d}-{_slug(entry.name)[:30]}-{key}.mp4"
     if out.exists():
@@ -374,7 +381,7 @@ def fetch_footage(entry: Entry, secs: float, dest: Path, cfg: Config) -> Path | 
         cands = [
             c
             for c in trends.yt_search(entry.query, 8)
-            if 20 <= c.duration <= cfg.top10.source_max_duration_s
+            if 20 <= c.duration <= (max_s or cfg.top10.source_max_duration_s)
         ]
     except Exception as e:
         log.warning("footage search failed for %r: %s", entry.query, e)
@@ -409,6 +416,33 @@ def fetch_footage(entry: Entry, secs: float, dest: Path, cfg: Config) -> Path | 
         for leftover in dest.glob(out.stem + "*"):
             leftover.unlink()
     return None
+
+
+def footage_stills(script: Script, n: int, cfg: Config, dest: Path) -> list[Path]:
+    """Up to `n` clean frames of the game, film or show a story is about, for the beats no
+    photograph fits: a photo library has nothing for a game. Each frame is checked first."""
+    if n <= 0 or not script.footage:
+        return []
+    # clean footage of a game is mostly hours-long walkthroughs; only a window is downloaded
+    clip = fetch_footage(Entry(0, "", "", script.footage), 120, dest, cfg, max_s=12 * 3600)
+    if clip is None:
+        log.warning("no footage found for %r", script.footage)
+        return []
+    dur = narrate.duration(clip)
+    out: list[Path] = []
+    looks = n * 3
+    for i in range(looks):
+        if len(out) == n:
+            break
+        f = dest / f"still-{i:02d}.jpg"
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{dur * (i + 0.5) / looks:.3f}"]
+            + ["-i", str(clip), "-frames:v", "1", "-q:v", "2", str(f)],
+            check=False,
+        )
+        if f.exists() and review.backdrop(f, script.footage, cfg):
+            out.append(f)
+    return out
 
 
 def _renumber(script: Script, cfg: Config, kept: int) -> None:
@@ -462,10 +496,15 @@ def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
             accept=fits,
             beat=e.line if fits else "",
         )
-        if p is None:
-            log.warning("no image for #%d %s; dropping it", e.rank, e.name)
-        else:
+        if p is not None:
             pics[id(e)] = p
+    bare = [e for e in script.entries if id(e) not in pics]
+    if story and bare and cfg.review.enabled:
+        stills = footage_stills(script, len(bare), cfg, vdir / "footage")
+        pics.update({id(e): s for e, s in zip(bare, stills, strict=False)})
+    for e in script.entries:
+        if id(e) not in pics:
+            log.warning("no image for #%d %s; dropping it", e.rank, e.name)
     script.entries = [e for e in script.entries if id(e) in pics]
     if len(script.entries) < max(3, cfg.verify.min_entries if cfg.verify.enabled else 3):
         raise RuntimeError(f"only {len(script.entries)} entries with images for {script.title!r}")

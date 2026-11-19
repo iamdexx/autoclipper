@@ -1843,3 +1843,37 @@ def test_tool_report_counts_each_models_calls_and_config_sets_the_order(tmp_path
         rank._call_gemini("hi", "g1")
     assert tools.report()["gemini/g1"] == {"ok": 0, "failed": 2, "why": {"other": 1, "timeout": 1}}
     tools.reset()
+
+
+def test_explainer_beats_without_a_photo_get_checked_footage_frames(tmp_path, monkeypatch):
+    from autoclipper import review, top10
+
+    cfg = _cfg(tmp_path)
+    clip = _synthetic(tmp_path, "clip.mp4", 6)
+    asked = {}
+
+    def fetch(entry, secs, dest, cfg, max_s=0):
+        asked.update(query=entry.query, max_s=max_s)
+        return clip
+
+    monkeypatch.setattr(top10, "fetch_footage", fetch)
+    seen = []
+    monkeypatch.setattr(
+        review, "backdrop", lambda p, subject, cfg: seen.append(p) or len(seen) % 2 == 0
+    )
+    s = top10.Script(topic="GTA 6", title="t", intro="", footage="GTA 6 gameplay no commentary")
+    got = top10.footage_stills(s, 2, cfg, tmp_path / "f")
+    assert len(got) == 2 and all(p.exists() for p in got) and len(seen) == 4  # refused: skipped
+    assert asked["query"] == s.footage and asked["max_s"] > cfg.top10.source_max_duration_s
+    s.footage = ""  # a story about the real world has no footage to fall back on
+    assert top10.footage_stills(s, 2, cfg, tmp_path / "g") == []
+
+    pic = tmp_path / "p.jpg"
+    pic.write_bytes(b"jpg")
+    monkeypatch.undo()
+
+    def down(p, pics, c):
+        raise RuntimeError("503")
+
+    monkeypatch.setattr(review, "_ask", down)
+    assert review.backdrop(pic, "GTA 6", cfg) is False  # never shown unchecked
