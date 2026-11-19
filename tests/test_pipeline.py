@@ -2060,3 +2060,25 @@ def test_a_handed_off_video_is_checked_and_queued_once(tmp_path, monkeypatch):
     queue.remove(cfg, other)
     (folder / "post.json").write_text(json.dumps({**post, "said": ""}))
     assert queue.handoff(folder, cfg) is None  # nothing to check the captions against
+||||||| 1e68311
+
+
+
+
+def test_letterbox_bars_are_cut_off_a_shot(tmp_path):
+    def clip(name, vf):
+        out = tmp_path / name
+        src = "testsrc2=s=1280x720:r=30:d=12"
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", src, "-vf", vf]
+        subprocess.run(cmd + ["-pix_fmt", "yuv420p", str(out)], check=True)
+        return out
+
+    assert render.letterbox(clip("full.mp4", "null")) == ""
+    barred = clip("barred.mp4", "drawbox=0:0:iw:90:black:fill,drawbox=0:630:iw:90:black:fill")
+    bars = render.letterbox(barred)
+    w, h, _, y = (int(x) for x in bars.removeprefix("crop=").split(":"))
+    assert w == 1280 and abs(h - 540) <= 8 and abs(y - 90) <= 4
+    assert render.shot_view(bars).startswith(bars + ",")
+    cfg = _cfg(tmp_path)
+    seg = render.render_shot(barred, 1.0, 2.0, None, [], cfg, tmp_path / "seg.mp4", bars=bars)
+    assert abs(narrate.duration(seg) - 2.0) < 0.2
