@@ -804,7 +804,12 @@ def pick_topic(cfg: Config, used: list[str], state=None) -> tuple[str, str] | No
     if t.style == "explainer" and t.focus_only and cfg.trends.pillars:
         main = [p for p in cfg.trends.pillars if not p.keywords]
         names = {p.name for p in main}
-        found = [tp for tp in found if tp.pillar in names]
+        found = [
+            tp
+            for tp in found
+            if tp.pillar in names
+            or (not tp.pillar and trends.on_focus(f"{tp.name} {tp.headline}", cfg, ""))
+        ]
         cfg = replace(cfg, trends=replace(cfg.trends, pillars=main))
     picked = trends.pick_topics(
         found, cfg, used, pillars_used=state.used_pillars() if state else None

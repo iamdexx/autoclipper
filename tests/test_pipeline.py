@@ -2023,4 +2023,8 @@ def test_explainer_focus_only_takes_topics_from_the_main_pillars(tmp_path, monke
     monkeypatch.setattr(trends, "pick_topics", pick)
     assert top10.pick_topic(cfg, [])[0] == "vice city"
     assert seen["pillars"] == ["map"]
+    # a Google trend has no pillar: it stays when it names the channel's own subject
+    cfg.trends.focus_keywords = ["gta"]
+    found[:] = [trends.Topic("xbox sale", "google"), trends.Topic("GTA 6 sales", "google")]
+    assert top10.pick_topic(cfg, [])[0] == "GTA 6 sales"
     assert [p.name for p in cfg.trends.pillars] == ["map", "consoles"]  # clips keep the whole mix
