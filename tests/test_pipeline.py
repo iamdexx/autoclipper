@@ -2046,6 +2046,7 @@ def test_a_handed_off_video_is_checked_and_queued_once(tmp_path, monkeypatch):
     assert it.source.startswith("handoff:story-")
     assert (it.kind, it.meta.title) == ("top10", "How It Happened")
     assert queue.handoff(folder, cfg) is None and len(queue.items(cfg)) == 1  # not queued twice
+    assert [f.name for f in folder.glob("*.mp4")] == [it.video]  # named once, not again
     queue.remove(cfg, it)
     state = State(tmp_path / "state.json")
     state.record_post(it.source, "story.mp4", "youtube", {"error": "quota"})
@@ -2054,9 +2055,11 @@ def test_a_handed_off_video_is_checked_and_queued_once(tmp_path, monkeypatch):
     queue.remove(cfg, again)
     state.record_post(it.source, "story.mp4", "youtube", {"id": "abc"})
     assert queue.handoff(folder, cfg, state) is None  # nor posted twice
+    (folder / it.video).unlink()
     (folder / "story.mp4").write_bytes(b"another video under the same name")
     other = queue.handoff(folder, cfg, state)
     assert other is not None and other.source != it.source
+    assert other.video != it.video  # so one cannot be served in place of the other
     queue.remove(cfg, other)
     (folder / "post.json").write_text(json.dumps({**post, "said": ""}))
     assert queue.handoff(folder, cfg) is None  # nothing to check the captions against
