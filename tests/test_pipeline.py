@@ -1951,3 +1951,25 @@ def test_explainer_article_is_the_one_the_model_names(tmp_path, monkeypatch):
     # Wikipedia refuses: asked once more, then the story goes without
     monkeypatch.setattr(trends, "_llm", lambda p, c: "Busy")
     assert top10.article_for("Busy topic", cfg) == [] and asked[-2:] == ["Busy", "Busy"]
+
+
+def test_a_story_about_a_game_is_shown_over_the_game_before_any_photo(tmp_path, monkeypatch):
+    from autoclipper import images, top10
+
+    cfg = _cfg(tmp_path)
+    cfg.review.enabled = True
+    es = [top10.Entry(2, "Revenue", "It made 1.6 billion dollars.", "dollar bill")]
+    es.append(top10.Entry(1, "Score", "It scored 99.", "Metacritic"))
+    s = top10.Script("t", "t", "i", entries=es, footage="GTA VI gameplay")
+    still = tmp_path / "still.jpg"
+    wanted, searched = [], []
+    monkeypatch.setattr(top10, "footage_stills", lambda sc, n, c, d: wanted.append(n) or [still])
+    photo = tmp_path / "photo.jpg"
+    monkeypatch.setattr(images, "fetch", lambda q, *a, **k: searched.append(q) or photo)
+    pics = top10._pictures(s, cfg, tmp_path, True)
+    # a frame for every beat is asked for; only the beat left without one gets a photo
+    assert wanted == [2] and searched == ["Metacritic"]
+    assert pics == {id(es[0]): still, id(es[1]): photo}
+    s.footage = ""  # a story about a place or a person: photos only
+    assert top10._pictures(s, cfg, tmp_path, True) == {id(es[0]): photo, id(es[1]): photo}
+    assert wanted == [2]
