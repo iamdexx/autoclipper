@@ -11,7 +11,7 @@ import logging
 import re
 import subprocess
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 from . import images, ingest, narrate, render, review, sfx, slop, trends, verify
@@ -800,8 +800,19 @@ def pick_topic(cfg: Config, used: list[str], state=None) -> tuple[str, str] | No
         idea = open_idea(cfg, used)
         if idea:
             return idea
+    found = trends.discover(cfg)
+    if t.style == "explainer" and t.focus_only and cfg.trends.pillars:
+        main = [p for p in cfg.trends.pillars if not p.keywords]
+        names = {p.name for p in main}
+        found = [
+            tp
+            for tp in found
+            if tp.pillar in names
+            or (not tp.pillar and trends.on_focus(f"{tp.name} {tp.headline}", cfg, ""))
+        ]
+        cfg = replace(cfg, trends=replace(cfg.trends, pillars=main))
     picked = trends.pick_topics(
-        trends.discover(cfg), cfg, used, pillars_used=state.used_pillars() if state else None
+        found, cfg, used, pillars_used=state.used_pillars() if state else None
     )
     if not picked:
         return None

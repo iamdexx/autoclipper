@@ -221,6 +221,9 @@ class TopTen:
     # explainer: every Nth one is on any subject the writer proposes (history, science, ...)
     # instead of this run's trending topic; 0 = never
     open_topic_every: int = 0
+    # explainer: topics come only from the main-subject pillars (those without their own
+    # `keywords`), so every story is about trends.focus
+    focus_only: bool = False
     item_min_s: float = 3.5  # each entry lasts at least this (longer if the narration is)
     listicle_gap_s: float = 0.25  # listicle: pause between items
     outro_s: float = 2.0  # #1's footage plays on (audio back up) this long after the last line

@@ -2000,3 +2000,31 @@ def test_a_story_about_a_game_is_shown_over_the_game_before_any_photo(tmp_path, 
     s.footage = ""  # a story about a place or a person: photos only
     assert top10._pictures(s, cfg, tmp_path, True) == {id(es[0]): photo, id(es[1]): photo}
     assert wanted == [2]
+
+
+def test_explainer_focus_only_takes_topics_from_the_main_pillars(tmp_path, monkeypatch):
+    from autoclipper import top10, trends
+    from autoclipper.config import Pillar
+
+    cfg = _cfg(tmp_path)
+    cfg.top10.style, cfg.top10.focus_only, cfg.top10.topics = "explainer", True, []
+    cfg.trends.pillars = [Pillar("map"), Pillar("consoles", keywords=["xbox"])]
+    found = [
+        trends.Topic("xbox price", "yt", pillar="consoles"),
+        trends.Topic("vice city", "yt", pillar="map"),
+    ]
+    monkeypatch.setattr(trends, "discover", lambda c: found)
+    seen = {}
+
+    def pick(topics, c, used, **k):
+        seen["pillars"] = [p.name for p in c.trends.pillars]
+        return topics
+
+    monkeypatch.setattr(trends, "pick_topics", pick)
+    assert top10.pick_topic(cfg, [])[0] == "vice city"
+    assert seen["pillars"] == ["map"]
+    # a Google trend has no pillar: it stays when it names the channel's own subject
+    cfg.trends.focus_keywords = ["gta"]
+    found[:] = [trends.Topic("xbox sale", "google"), trends.Topic("GTA 6 sales", "google")]
+    assert top10.pick_topic(cfg, [])[0] == "GTA 6 sales"
+    assert [p.name for p in cfg.trends.pillars] == ["map", "consoles"]  # clips keep the whole mix
