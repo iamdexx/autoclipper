@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import analytics, publish, qa, queue, top10, trends, verify
+from . import analytics, publish, qa, queue, rank, tools, top10, trends, verify
 from .config import Config, Creator
 from .pipeline import make_top10, process_video, run_once, run_trends
 from .state import State
@@ -83,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
     for noisy in ("httpcore", "httpx", "urllib3", "google", "googleapiclient"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     cfg = Config.load(args.config)
+    rank.configure(cfg)
     state = State(cfg.workdir / "state.json")
 
     if args.cmd == "clip":
@@ -168,7 +169,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n{'OK' if rep.ok else 'REJECTED'}")
         return 0 if rep.ok else 1
     if args.cmd == "run":
-        run_once(cfg, state)
+        try:
+            run_once(cfg, state)
+        finally:
+            tools.log_report()
         return 0
     if args.cmd == "watch":
         while True:
