@@ -13,7 +13,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import ingest, narrate, rank
+from . import ingest, narrate, rank, trends
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -53,6 +53,9 @@ caption line in the lower middle, a small title at the top for the first seconds
 Our own elements are never foreign_overlays, but still check our captions and title for
 garbled_captions and inconsistent_wording. Judge it the way a viewer who likes the subject would, strictly
 from what you see and read. Be hard to please: most videos should not pass.
+A caption shows only a few words of a sentence at a time, so a caption that stops mid-sentence
+in the last frame is normal. Judge "cut_off" only from the first and the last sentence of what
+is said below: if the last sentence there is complete, the video does not end cut off.
 
 {format}
 
@@ -223,6 +226,25 @@ def _own_mark(cfg: Config) -> str:
     return f'our channel handle "{cfg.look.watermark}" as a small watermark in a top corner'
 
 
+ENDS_PROMPT = """Below is everything said in a short video, first sentence to last. Does it open
+at the start of a thought and stop at the end of a sentence? A closing "subscribe" line counts
+as an ending. Answer with one word: "complete" or "cut".
+
+{said}"""
+
+
+def _reads_complete(said: str, cfg: Config) -> bool:
+    """The reviewer sees frames, and a caption holds a few words of a sentence, so it called
+    videos cut off whose speech ended on a full sentence: the writer's model reads the words.
+    False when it cannot be asked, so the reviewer's "cut_off" stands."""
+    try:
+        answer = trends._llm(ENDS_PROMPT.format(said=said[:6000]), cfg)
+    except Exception as e:
+        log.warning("could not re-read the ending (%s)", e)
+        return False
+    return (re.findall(r"\b(complete|cut)\b", answer.lower()) or ["cut"])[-1] == "complete"
+
+
 def video(path: Path, kind: str, cfg: Config) -> Verdict:
     """The finished video against the viewer's checklist; the report lands in <video>.review.json.
     ok=None when the review could not be run."""
@@ -241,6 +263,9 @@ def video(path: Path, kind: str, cfg: Config) -> Verdict:
             cfg,
         )
         problems = [str(p) for p in j.get("problems") or []]
+        if "cut_off" in problems and _reads_complete(said, cfg):
+            log.info("review of %s said cut_off; the words read complete", path.name)
+            problems.remove("cut_off")
         score = int(float(j.get("score", 0) or 0))
         v = Verdict(
             not problems and score >= PASS_SCORE, score, problems, str(j.get("note", ""))[:300]
