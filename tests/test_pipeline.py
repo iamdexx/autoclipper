@@ -2102,3 +2102,6 @@ def test_a_moment_opens_and_closes_on_whole_sentences(tmp_path):
     assert rank._on_sentences(4, 8, segs, cfg) == (3, 9)  # opens on the sentence's first word
     cfg.clips.max_len_s = 5
     assert rank._on_sentences(3, 8, segs, cfg) is None  # nothing closes within 5s: no clip
+    cfg.clips.max_len_s = 10
+    quoted = [seg(0, "she said “the new map really works.”")]
+    assert rank._on_sentences(0, 7, quoted, cfg) == (0, 7)  # a closing curly quote ends one too

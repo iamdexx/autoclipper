@@ -359,7 +359,7 @@ def _parse_json_array(text: str) -> list[dict]:
     return json.loads(m.group(0))
 
 
-_SENTENCE_END = re.compile(r"[.!?][\"')\]]*$")
+_SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]*$")
 
 
 def _snap(t: float, segments: list[Segment], to_end: bool) -> float:
