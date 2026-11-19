@@ -2043,10 +2043,13 @@ def test_a_handed_off_video_is_checked_and_queued_once(tmp_path, monkeypatch):
     monkeypatch.setattr(qa, "gate", lambda v, c, said, kind: True)
     it = queue.handoff(folder, cfg)
     assert seen == [("words", "top10")]
-    assert it.source.startswith("handoff:story-")
+    assert it.source.startswith("handoff:") and it.video.startswith("handoff-")
     assert (it.kind, it.meta.title) == ("top10", "How It Happened")
     assert queue.handoff(folder, cfg) is None and len(queue.items(cfg)) == 1  # not queued twice
     assert [f.name for f in folder.glob("*.mp4")] == ["story.mp4"]  # the folder is left as is
+    (folder / "story.mp4").rename(folder / it.video)
+    assert queue.handoff(folder, cfg) is None  # the same video under another name is the same
+    (folder / it.video).rename(folder / "story.mp4")
     queue.remove(cfg, it)
     state = State(tmp_path / "state.json")
     state.record_post(it.source, "story.mp4", "youtube", {"error": "quota"})

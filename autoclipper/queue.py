@@ -123,14 +123,14 @@ def handoff(folder: Path, cfg: Config, state: State | None = None) -> Item | Non
     if not meta.title or not said:
         log.error("handoff %s refused: no title or no words", folder)
         return None
-    # the file's own content names it: two hand-offs may both be called final.mp4, and
-    # everything after this (the queue, a public copy for Instagram) goes by the file's name
+    # the file's content alone names it: two hand-offs may both be called final.mp4, one video
+    # may come back under another name, and the queue and Instagram's public copy go by name
     sha = hashlib.sha1()
     with video.open("rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             sha.update(chunk)
-    name = f"{video.stem}-{sha.hexdigest()[:8]}"
-    source = f"handoff:{name}"
+    name = f"handoff-{sha.hexdigest()[:12]}"  # whatever the file was called
+    source = f"handoff:{sha.hexdigest()[:12]}"
     posted = state is not None and any(
         p.get("video") == source and "error" not in p and "skipped" not in p
         for p in state.data["posts"]
