@@ -416,6 +416,16 @@ def has_video(path: Path) -> bool:
     return "video" in out
 
 
+def _tallest(url: str, fmt: str) -> int:
+    """The height of the picture `fmt` would get from this video (0 when it cannot be told)."""
+    cmd = ingest.ytdlp("--no-playlist", "--simulate", "--print", "%(height)s", "-f", fmt, url)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        return int(r.stdout.strip().splitlines()[-1])
+    except (subprocess.TimeoutExpired, ValueError, IndexError):
+        return 0
+
+
 def fetch_footage(
     entry: Entry,
     secs: float,
@@ -423,10 +433,11 @@ def fetch_footage(
     cfg: Config,
     max_s: float = 0,
     skip: frozenset[str] = frozenset(),
+    height: int = 720,
 ) -> Path | None:
     """Download only a `secs`-long window from the best-matching video (yt-dlp sections).
     `max_s`: the longest video to take it from (default: top10.source_max_duration_s).
-    `skip`: ids of videos not to take it from."""
+    `skip`: ids of videos not to take it from. `height`: the tallest picture to take."""
     key = hashlib.sha1(f"{entry.name}|{entry.query}".encode()).hexdigest()[:8]
     out = dest / f"{entry.rank:02d}-{_slug(entry.name)[:30]}-{key}.mp4"
     source = out.with_suffix(".id")  # which video a kept clip came from
@@ -452,16 +463,25 @@ def fetch_footage(
         and trends.rights_ok(c.title, c.channel, cfg)
     ]
     cands.sort(key=lambda c: -c.views)
-    for c in cands[:3]:
+    fmt = "b[height<=720][ext=mp4]/bv*[height<=720][ext=mp4]+ba[ext=m4a]/b"
+    if height > 720:  # above 1080p YouTube serves no mp4, and AV1 decodes slowly
+        fmt = f"bv*[height<={height}][vcodec!*=av01]+ba/bv*[height<={height}]+ba/b"
+    cands = cands[:3]
+    if height > 720:  # the tallest picture first: an upload may stop at 1080p
+        tall = {c.id: _tallest(c.url, fmt) for c in cands}
+        cands.sort(key=lambda c: -tall[c.id])
+        log.info("footage for %r: %s", entry.query, [f"{c.id} {tall[c.id]}p" for c in cands])
+    for c in cands:
         # skip the first ~20% (intros) and pull a window from there
         start = max(0.0, min(c.duration * 0.2, c.duration - secs - 1))
         cmd = ingest.ytdlp(
             "--no-playlist",
             "-f",
-            "b[height<=720][ext=mp4]/bv*[height<=720][ext=mp4]+ba[ext=m4a]/b",
+            fmt,
             "--download-sections",
             f"*{start:.0f}-{start + secs:.0f}",
-            "--force-keyframes-at-cuts",
+            # exact cuts re-encode the window, which takes too long above 720p
+            *(["--force-keyframes-at-cuts"] if height <= 720 else []),
             "--merge-output-format",
             "mp4",
             "-o",
@@ -479,39 +499,59 @@ def fetch_footage(
     return None
 
 
-def footage_stills(script: Script, n: int, cfg: Config, dest: Path) -> list[Path]:
-    """Up to `n` clean frames of the game, film or show a story is about, for the beats no
-    photograph fits: a photo library has nothing for a game. Each frame is checked first."""
+SHOT_S = 10.0  # a beat's footage: this long, and checked at its start, middle and end
+
+
+@dataclass
+class Shot:
+    """A stretch of footage a beat is narrated over: `clip` from `start` seconds on."""
+
+    clip: Path
+    start: float
+
+
+def _frame(clip: Path, at: float, out: Path) -> Path | None:
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{at:.3f}", "-i", str(clip)]
+    vf = f"{render.SHOT_CROP},scale=-2:720"  # what the viewer will see of it
+    subprocess.run(cmd + ["-frames:v", "1", "-vf", vf, "-q:v", "3", str(out)], check=False)
+    return out if out.exists() else None
+
+
+def footage_shots(script: Script, n: int, cfg: Config, dest: Path) -> list[Shot]:
+    """Up to `n` clean stretches of the game, film or show a story is about, one per beat: a
+    photo library has nothing for a game, and a frozen frame of one is not worth watching. A
+    stretch is taken only when frames from its start, middle and end all pass the check."""
     if n <= 0 or not script.footage:
         return []
     dest.mkdir(parents=True, exist_ok=True)
-    out: list[Path] = []
+    out: list[Shot] = []
     tried: set[str] = set()
     for k in range(3):  # one upload may carry its channel's watermark throughout: try others
         if len(out) >= n:
             break
-        # clean footage of a game is mostly hours-long walkthroughs; only a window is downloaded
+        # clean footage of a game is mostly hours-long walkthroughs; only a window is downloaded,
+        # at the tallest picture there is: the middle of a wide frame has to fill a tall screen
         src = Entry(k, "", "", script.footage)
-        clip = fetch_footage(src, 120, dest, cfg, max_s=12 * 3600, skip=frozenset(tried))
+        clip = fetch_footage(
+            src, 240, dest, cfg, max_s=12 * 3600, skip=frozenset(tried), height=2160
+        )
         if clip is None:
             log.warning("no more footage found for %r", script.footage)
             break
         tried.add(src.video_id)
-        dur = narrate.duration(clip)
-        looks = (n - len(out)) * 3
-        for i in range(looks):
-            if len(out) == n:
+        count = int(narrate.duration(clip) // SHOT_S)
+        # every third stretch first: beats that follow each other should not show one scene
+        for at in [i * SHOT_S for k3 in range(3) for i in range(k3, count, 3)]:
+            if len(out) >= n:
                 break
-            f = dest / f"still-{k}-{i:02d}.jpg"
-            subprocess.run(
-                ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{dur * (i + 0.5) / looks:.3f}"]
-                + ["-i", str(clip), "-frames:v", "1", "-q:v", "2"]
-                # a game's own subtitles and button prompts sit at the bottom of the frame
-                + ["-vf", "crop=iw:ih*0.78:0:0", str(f)],
-                check=False,
-            )
-            if f.exists() and review.backdrop(f, script.footage, cfg):
-                out.append(f)
+            ok = True
+            for j, t in enumerate((at + 0.5, at + SHOT_S / 2, at + SHOT_S - 1.5)):
+                f = _frame(clip, t, dest / f"check-{k}-{at:05.0f}-{j}.jpg")
+                if f is None or not review.backdrop(f, script.footage, cfg):
+                    ok = False
+                    break
+            if ok:
+                out.append(Shot(clip, at))
     return out
 
 
@@ -542,14 +582,16 @@ def _finish(parts: list[Path], title: str, cfg: Config, vdir: Path) -> Path:
     return out
 
 
-def _pictures(script: Script, cfg: Config, vdir: Path, story: bool) -> dict[int, Path]:
-    """The picture each entry is shown over, keyed by id(entry); an entry with none is absent."""
-    pics: dict[int, Path] = {}
+def _pictures(script: Script, cfg: Config, vdir: Path, story: bool) -> dict[int, Path | Shot]:
+    """What each entry is shown over (a photo, or a stretch of footage), keyed by id(entry); an
+    entry with nothing is absent."""
+    pics: dict[int, Path | Shot] = {}
     if story and script.footage and cfg.review.enabled:
         # a story about a game is shown over the game: the photo library answers a line about
         # its revenue with a dollar bill, and the finished video failed for wrong pictures
-        stills = footage_stills(script, len(script.entries), cfg, vdir / "footage")
-        pics.update({id(e): s for e, s in zip(script.entries, stills, strict=False)})
+        shots = footage_shots(script, len(script.entries), cfg, vdir / "footage")
+        pics.update({id(e): s for e, s in zip(script.entries, shots, strict=False)})
+        return pics  # no photos mixed in: a beat without footage is dropped
     for e in script.entries:
         if id(e) in pics:
             continue
@@ -599,6 +641,7 @@ def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
     if outro:  # the subscribe line rides on the last photo
         segments.append((outro, script.entries[-1]))
     parts: list[Path] = []
+    played: dict[int, float] = {}
     for i, (text, entry) in enumerate(segments):
         seg = vdir / "segments" / f"{i:02d}.mp4"
         voiced = narrate.synthesize_timed(text, cfg, seg.with_suffix(".voice.m4a"))
@@ -613,9 +656,16 @@ def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
         # the intro shares the first item's photo: zoom out on the intro, in on the item
         zoom_in = i % 2 == 1 if story else not (script.intro and i == 0)
         title = script.title if story and i == 0 else ""
-        render.render_still(
-            pics[id(entry)], dur, voice, words, cfg, seg, zoom_in=zoom_in, title=title, fill=story
-        )
+        pic = pics[id(entry)]
+        if isinstance(pic, Shot):
+            # the intro and the outro share a beat's footage: it plays on, it does not restart
+            at = played.get(id(entry), 0.0)
+            played[id(entry)] = at + dur
+            render.render_shot(pic.clip, pic.start + at, dur, voice, words, cfg, seg, title=title)
+        else:
+            render.render_still(
+                pic, dur, voice, words, cfg, seg, zoom_in=zoom_in, title=title, fill=story
+            )
         parts.append(seg)
     return _finish(parts, script.title, cfg, vdir)
 

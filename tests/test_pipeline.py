@@ -1853,35 +1853,50 @@ def test_tool_report_counts_each_models_calls_and_config_sets_the_order(tmp_path
     tools.reset()
 
 
-def test_explainer_beats_without_a_photo_get_checked_footage_frames(tmp_path, monkeypatch):
-    from autoclipper import review, top10
+def test_story_footage_is_moving_stretches_checked_start_middle_and_end(tmp_path, monkeypatch):
+    from autoclipper import narrate, render, review, top10
 
     cfg = _cfg(tmp_path)
-    clip = _synthetic(tmp_path, "clip.mp4", 6)
+    clip = _synthetic(tmp_path, "clip.mp4", 32)
     asked = {}
 
-    def fetch(entry, secs, dest, cfg, max_s=0, skip=frozenset()):
-        asked.update(query=entry.query, max_s=max_s)
+    def fetch(entry, secs, dest, cfg, max_s=0, skip=frozenset(), height=720):
+        asked.update(query=entry.query, max_s=max_s, height=height)
         asked.setdefault("skips", []).append(skip)
         entry.video_id = f"v{entry.rank}"
         return clip
 
     monkeypatch.setattr(top10, "fetch_footage", fetch)
     seen = []
+    # the first stretch ends on a frame with a menu: it is not used
     monkeypatch.setattr(
-        review, "backdrop", lambda p, subject, cfg: seen.append(p) or len(seen) % 2 == 0
+        review,
+        "backdrop",
+        lambda p, subject, cfg: seen.append(p.name) or p.name != "check-0-00000-2.jpg",
     )
     s = top10.Script(topic="GTA 6", title="t", intro="", footage="GTA 6 gameplay no commentary")
-    got = top10.footage_stills(s, 2, cfg, tmp_path / "f")
-    assert len(got) == 2 and all(p.exists() for p in got) and len(seen) == 4  # refused: skipped
+    got = top10.footage_shots(s, 2, cfg, tmp_path / "f")
+    assert [(g.clip, g.start) for g in got] == [(clip, 10.0), (clip, 20.0)] and len(seen) == 9
+    long = _synthetic(tmp_path, "long.mp4", 62)
+    monkeypatch.setattr(top10, "fetch_footage", lambda e, *a, **k: long)
+    monkeypatch.setattr(review, "backdrop", lambda p, subject, cfg: True)
+    far = top10.footage_shots(s, 3, cfg, tmp_path / "far")
+    assert [g.start for g in far] == [0.0, 30.0, 10.0]  # not three stretches of one scene
+    monkeypatch.setattr(top10, "fetch_footage", fetch)
     assert asked["query"] == s.footage and asked["max_s"] > cfg.top10.source_max_duration_s
+    assert asked["height"] > 1080  # the middle of a wide frame has to fill a tall screen
+    seg = render.render_shot(clip, 10.0, 2.0, None, [], cfg, tmp_path / "seg.mp4", title="T")
+    assert abs(narrate.duration(seg) - 2.0) < 0.2
+    # footage that runs out holds its last frame for the rest of the line
+    seg = render.render_shot(clip, 31.0, 3.0, None, [], cfg, tmp_path / "end.mp4")
+    assert abs(narrate.duration(seg) - 3.0) < 0.2
     # a source with no clean frame is not asked for again: the next one is tried
     monkeypatch.setattr(review, "backdrop", lambda p, subject, cfg: False)
     asked["skips"] = []
-    assert top10.footage_stills(s, 1, cfg, tmp_path / "h") == []
+    assert top10.footage_shots(s, 1, cfg, tmp_path / "h") == []
     assert asked["skips"] == [frozenset(), {"v0"}, {"v0", "v1"}]
     s.footage = ""  # a story about the real world has no footage to fall back on
-    assert top10.footage_stills(s, 2, cfg, tmp_path / "g") == []
+    assert top10.footage_shots(s, 2, cfg, tmp_path / "g") == []
 
     pic = tmp_path / "p.jpg"
     pic.write_bytes(b"jpg")
@@ -1961,15 +1976,15 @@ def test_a_story_about_a_game_is_shown_over_the_game_before_any_photo(tmp_path, 
     es = [top10.Entry(2, "Revenue", "It made 1.6 billion dollars.", "dollar bill")]
     es.append(top10.Entry(1, "Score", "It scored 99.", "Metacritic"))
     s = top10.Script("t", "t", "i", entries=es, footage="GTA VI gameplay")
-    still = tmp_path / "still.jpg"
+    still = top10.Shot(tmp_path / "clip.mp4", 10.0)
     wanted, searched = [], []
-    monkeypatch.setattr(top10, "footage_stills", lambda sc, n, c, d: wanted.append(n) or [still])
+    monkeypatch.setattr(top10, "footage_shots", lambda sc, n, c, d: wanted.append(n) or [still])
     photo = tmp_path / "photo.jpg"
     monkeypatch.setattr(images, "fetch", lambda q, *a, **k: searched.append(q) or photo)
     pics = top10._pictures(s, cfg, tmp_path, True)
-    # a frame for every beat is asked for; only the beat left without one gets a photo
-    assert wanted == [2] and searched == ["Metacritic"]
-    assert pics == {id(es[0]): still, id(es[1]): photo}
+    # footage for every beat is asked for; a beat left without any gets no stock photo
+    assert wanted == [2] and searched == []
+    assert pics == {id(es[0]): still}
     s.footage = ""  # a story about a place or a person: photos only
     assert top10._pictures(s, cfg, tmp_path, True) == {id(es[0]): photo, id(es[1]): photo}
     assert wanted == [2]

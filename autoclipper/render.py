@@ -405,6 +405,43 @@ def render_still(
     return out
 
 
+# a game's own subtitles and button prompts sit in the bottom of its frame
+SHOT_CROP = "crop=iw:ih*0.78:0:0"
+
+
+def render_shot(
+    clip: Path,
+    start: float,
+    dur: float,
+    voice: Path | None,
+    words: list[Word],
+    cfg: Config,
+    out: Path,
+    title: str = "",
+) -> Path:
+    """One beat of a story over moving footage: `dur` seconds of `clip` from `start`, its middle
+    filling the frame, its own sound off, captions in the global style, narration as the only
+    audio. Footage that runs out holds its last frame."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    ass_path = out.with_suffix(".ass")
+    ass_path.write_text(build_ass(words, title, dur, cfg, badge=""))
+    vf = (
+        f"[0:v]{SHOT_CROP},scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,"
+        f"crop={W}:{H},fps={FPS},setsar=1,tpad=stop_mode=clone:stop_duration={dur:.3f},"
+        f"ass={ass_path.as_posix()}[v]"
+    )
+    inputs = ["-ss", f"{max(0.0, start):.3f}", "-t", f"{dur:.3f}", "-i", str(clip)]
+    if voice:
+        inputs += ["-i", str(voice)]
+        vf += f";[1:a]{NORM},apad=whole_dur={dur:.3f},atrim=0:{dur:.3f}[a]"
+    else:
+        vf += f";anullsrc=r=48000:cl=stereo,atrim=0:{dur:.3f}[a]"
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", *inputs, "-filter_complex", vf]
+    cmd += ["-map", "[v]", "-map", "[a]", "-t", f"{dur:.3f}", *_ENC, str(out)]
+    subprocess.check_call(cmd)
+    return out
+
+
 def concat(parts: list[Path], out: Path, fade_out: float = 0.0) -> Path:
     """Join segments rendered with the same _ENC settings; `fade_out` eases the audio out over
     the last N seconds so the video ends on a beat instead of a cut."""
