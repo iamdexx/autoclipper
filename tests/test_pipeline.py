@@ -1487,6 +1487,14 @@ def test_review_verdict_needs_a_clean_checklist_and_a_high_score(tmp_path, monke
     assert "no watermark" in prompts[1] and "@Clipverse-HQ" not in prompts[1]
     answer["score"] = 6
     assert review.video(f, "clip", cfg).ok is False
+    # "cut_off" comes from a caption holding half a sentence: the words are read a second time
+    answer.update(score=8, problems=["cut_off"])
+    monkeypatch.setattr(review.trends, "_llm", lambda p, c: "Complete.")
+    assert review.video(f, "clip", cfg).ok is True
+    monkeypatch.setattr(review.trends, "_llm", lambda p, c: "It is cut")
+    assert review.video(f, "clip", cfg).problems == ["cut_off"]
+    monkeypatch.setattr(review.trends, "_llm", lambda p, c: 1 / 0)  # cannot be asked: it stands
+    assert review.video(f, "clip", cfg).ok is False
     answer.update(score=9, problems=["foreign_overlays"])
     v = review.video(f, "top10", cfg)
     assert v.ok is False and json.loads(f.with_suffix(".review.json").read_text())["problems"]
