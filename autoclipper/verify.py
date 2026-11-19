@@ -129,7 +129,11 @@ def names_query(page: dict, query: str) -> bool:
     redirect to it shares a word with the query. A full-text search also returns articles that
     merely cite the words somewhere (a 'GTA 6 Review Roundup' query hit 'Space Invaders')."""
     names = [page.get("title", ""), *(r.get("title", "") for r in page.get("redirects") or [])]
-    return bool(_words(query) & _words(" ".join(names)))
+    words = _words(query)
+    if not words:  # 'The Who', 'X': the whole query is the name
+        key = re.sub(r"[^a-z0-9]+", " ", query.lower()).strip()
+        return any(re.sub(r"[^a-z0-9]+", " ", n.lower()).strip() == key for n in names)
+    return bool(words & _words(" ".join(names)))
 
 
 def wiki_extract(query: str, chars: int = 9000) -> list[Evidence]:

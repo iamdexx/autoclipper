@@ -140,6 +140,10 @@ def test_wiki_extract_skips_article_that_only_cites_the_query(monkeypatch):
     assert ev and ev[0].title.startswith("Grand Theft Auto VI:")
     pages["1"] = _wiki_page("Space Invaders")
     assert verify.wiki_extract("Why did Space Invaders speed up?")
+    # a subject made only of short or common words is matched by its whole name
+    pages["1"] = _wiki_page("The Who")
+    assert verify.wiki_extract("The Who")
+    assert not verify.names_query(_wiki_page("The Who"), "Who")
 
 
 def test_gather_survives_failing_sources(monkeypatch):
