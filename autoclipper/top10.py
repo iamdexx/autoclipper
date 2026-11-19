@@ -127,6 +127,8 @@ Use one word for one thing from the title to the last beat (if the title says "r
 say "railroad"), and the spelling of the place the story is set in. Open the intro on the single
 most surprising fact. Each beat's photo must show what that beat talks about.
 Narration is plain spoken words only: no emojis, hashtags, stage directions or numbering.
+Write every number in digits ("475 million", "1.65 billion", "13 years"), never spelled out: the
+line is shown on screen a few words at a time, and "seventy-five million" alone reads as wrong.
 Return ONLY JSON:
 {{"title": "<the question or claim, max 9 words, Title Case>",
   "intro": "<the puzzle in one sentence, max 18 words>",
