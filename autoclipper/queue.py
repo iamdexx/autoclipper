@@ -4,6 +4,7 @@ are never picked age out, so the queue holds the strongest recent candidates, no
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import shutil
@@ -120,8 +121,12 @@ def handoff(folder: Path, cfg: Config, state: State | None = None) -> Item | Non
     if not meta.title or not said:
         log.error("handoff %s refused: no title or no words", folder)
         return None
-    source = f"handoff:{video.stem}"
-    posted = state is not None and any(p.get("video") == source for p in state.data["posts"])
+    # the file's own content names it: two hand-offs may both be called final.mp4
+    source = f"handoff:{video.stem}-{hashlib.sha1(video.read_bytes()).hexdigest()[:8]}"
+    posted = state is not None and any(
+        p.get("video") == source and "error" not in p and "skipped" not in p
+        for p in state.data["posts"]
+    )
     if posted or any(it.source == source for it in items(cfg)):
         log.info("handoff %s is already queued or posted", video.name)
         return None

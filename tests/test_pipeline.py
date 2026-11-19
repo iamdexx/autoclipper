@@ -2043,11 +2043,20 @@ def test_a_handed_off_video_is_checked_and_queued_once(tmp_path, monkeypatch):
     monkeypatch.setattr(qa, "gate", lambda v, c, said, kind: True)
     it = queue.handoff(folder, cfg)
     assert seen == [("words", "top10")]
-    assert (it.source, it.kind, it.meta.title) == ("handoff:story", "top10", "How It Happened")
+    assert it.source.startswith("handoff:story-")
+    assert (it.kind, it.meta.title) == ("top10", "How It Happened")
     assert queue.handoff(folder, cfg) is None and len(queue.items(cfg)) == 1  # not queued twice
     queue.remove(cfg, it)
     state = State(tmp_path / "state.json")
-    state.record_post("handoff:story", "story.mp4", "youtube", {"id": "abc"})
+    state.record_post(it.source, "story.mp4", "youtube", {"error": "quota"})
+    again = queue.handoff(folder, cfg, state)  # an upload that failed may be handed in again
+    assert again is not None
+    queue.remove(cfg, again)
+    state.record_post(it.source, "story.mp4", "youtube", {"id": "abc"})
     assert queue.handoff(folder, cfg, state) is None  # nor posted twice
+    (folder / "story.mp4").write_bytes(b"another video under the same name")
+    other = queue.handoff(folder, cfg, state)
+    assert other is not None and other.source != it.source
+    queue.remove(cfg, other)
     (folder / "post.json").write_text(json.dumps({**post, "said": ""}))
     assert queue.handoff(folder, cfg) is None  # nothing to check the captions against
