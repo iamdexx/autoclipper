@@ -1479,7 +1479,8 @@ def test_review_verdict_needs_a_clean_checklist_and_a_high_score(tmp_path, monke
     assert review.video(f, "clip", cfg).ok is True and models == [None]
     # the reviewer took our own handle for another channel's watermark (foreign_overlays)
     assert 'our channel handle "@Clipverse-HQ"' in prompts[0]
-    assert "Our own elements are never a problem" in prompts[0]
+    assert "Our own elements are never foreign_overlays" in prompts[0]
+    assert "garbled_captions and inconsistent_wording" in prompts[0]  # still judged
     cfg.look.watermark = ""
     review.video(f, "clip", cfg)
     assert "no watermark" in prompts[1] and "@Clipverse-HQ" not in prompts[1]

@@ -48,7 +48,8 @@ TRANSCRIPT START:
 VIDEO_PROMPT = """These are {n} frames sampled evenly, in order, from a finished vertical short our
 channel is about to publish, followed by everything said in it. Our own elements are: one
 caption line in the lower middle, a small title at the top for the first seconds, and {mark}.
-Our own elements are never a problem. Judge it the way a viewer who likes the subject would, strictly
+Our own elements are never foreign_overlays, but still check our captions and title for
+garbled_captions and inconsistent_wording. Judge it the way a viewer who likes the subject would, strictly
 from what you see and read. Be hard to please: most videos should not pass.
 
 {format}
