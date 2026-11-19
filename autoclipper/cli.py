@@ -46,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
     qp.add_argument("video")
     qp.add_argument("--script", help="script.json (top10) to compare the narration against")
     qp.add_argument("--expect", default="", help="text the narrator should be heard saying")
+    hp = sub.add_parser("handoff", help="queue a finished video from a folder (video + post.json)")
+    hp.add_argument("dir")
     sub.add_parser("run", help="one pass: creators + trends + top10 (whatever is enabled)")
     sub.add_parser("watch", help="loop `run` forever every poll_interval_s")
 
@@ -168,6 +170,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{'PASS' if c.ok else 'FAIL'} {c.name:<11} {c.detail}")
         print(f"\n{'OK' if rep.ok else 'REJECTED'}")
         return 0 if rep.ok else 1
+    if args.cmd == "handoff":
+        return 0 if queue.handoff(Path(args.dir), cfg, state) else 1
     if args.cmd == "run":
         try:
             run_once(cfg, state)

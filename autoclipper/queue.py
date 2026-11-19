@@ -94,6 +94,45 @@ def enqueue(
     return it
 
 
+HANDOFF_SCORE = 7.0  # where a finished video handed to a run stands in the queue (a story's score)
+
+
+def handoff(folder: Path, cfg: Config, state: State | None = None) -> Item | None:
+    """Queue a video that was built outside a run: `folder` holds one .mp4 and a post.json with
+    its title, description, hashtags, `said` (every word it speaks) and `kind`. It gets no
+    shortcut: the output check runs here, and the editor's review and the posting budget apply
+    when the queue is drained, as for any video. None when it is refused, queued or posted."""
+    from . import qa
+
+    try:
+        j = json.loads((folder / "post.json").read_text())
+        (video,) = sorted(folder.glob("*.mp4"))
+        meta = PostMeta(
+            title=str(j["title"]).strip(),
+            description=str(j["description"]).strip(),
+            hashtags=[str(h) for h in j.get("hashtags", [])],
+            **({"category": str(j["category"])} if j.get("category") else {}),
+        )
+        said, kind = str(j["said"]).strip(), str(j.get("kind") or "top10")
+    except Exception as e:
+        log.error("handoff %s refused: %s", folder, e)
+        return None
+    if not meta.title or not said:
+        log.error("handoff %s refused: no title or no words", folder)
+        return None
+    source = f"handoff:{video.stem}"
+    posted = state is not None and any(p.get("video") == source for p in state.data["posts"])
+    if posted or any(it.source == source for it in items(cfg)):
+        log.info("handoff %s is already queued or posted", video.name)
+        return None
+    if not qa.gate(video, cfg, said, kind=kind):
+        log.error("handoff %s refused by the output check", video.name)
+        return None
+    return enqueue(
+        video, kind, source, HANDOFF_SCORE, meta, cfg, hook=meta.title, hashtags=meta.hashtags
+    )
+
+
 def items(cfg: Config) -> list[Item]:
     """Best first: score, then newest."""
     d = _dir(cfg)

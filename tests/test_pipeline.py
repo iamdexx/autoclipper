@@ -2028,3 +2028,26 @@ def test_explainer_focus_only_takes_topics_from_the_main_pillars(tmp_path, monke
     found[:] = [trends.Topic("xbox sale", "google"), trends.Topic("GTA 6 sales", "google")]
     assert top10.pick_topic(cfg, [])[0] == "GTA 6 sales"
     assert [p.name for p in cfg.trends.pillars] == ["map", "consoles"]  # clips keep the whole mix
+
+
+def test_a_handed_off_video_is_checked_and_queued_once(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    folder = tmp_path / "handoff"
+    folder.mkdir()
+    (folder / "story.mp4").write_bytes(b"x")
+    post = {"title": "How It Happened", "description": "d", "hashtags": ["#a"], "said": "words"}
+    (folder / "post.json").write_text(json.dumps(post))
+    seen = []
+    monkeypatch.setattr(qa, "gate", lambda v, c, said, kind: seen.append((said, kind)) or False)
+    assert queue.handoff(folder, cfg) is None and not queue.items(cfg)  # the output check decides
+    monkeypatch.setattr(qa, "gate", lambda v, c, said, kind: True)
+    it = queue.handoff(folder, cfg)
+    assert seen == [("words", "top10")]
+    assert (it.source, it.kind, it.meta.title) == ("handoff:story", "top10", "How It Happened")
+    assert queue.handoff(folder, cfg) is None and len(queue.items(cfg)) == 1  # not queued twice
+    queue.remove(cfg, it)
+    state = State(tmp_path / "state.json")
+    state.record_post("handoff:story", "story.mp4", "youtube", {"id": "abc"})
+    assert queue.handoff(folder, cfg, state) is None  # nor posted twice
+    (folder / "post.json").write_text(json.dumps({**post, "said": ""}))
+    assert queue.handoff(folder, cfg) is None  # nothing to check the captions against

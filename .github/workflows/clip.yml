@@ -3,6 +3,11 @@ on:
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
+    inputs:
+      handoff:
+        description: "Tag of a release holding a finished video and its post.json: it is checked, queued and posted like any other video"
+        required: false
+        default: ""
   # GitHub's schedule has skipped whole afternoons. A comment "/run-clipper" on any issue or PR,
   # from the repo owner or the Devin app, starts a run on main.
   issue_comment:
@@ -49,6 +54,17 @@ jobs:
             data/queue
           key: autoclipper-state-${{ github.run_id }}
           restore-keys: autoclipper-state-
+      - name: queue a handed-off video
+        if: github.event_name == 'workflow_dispatch' && inputs.handoff != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HANDOFF_TAG: ${{ inputs.handoff }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY || secrets.Nvidiaapi || secrets.Nvidiakey }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.Geminikey }}
+        run: |
+          gh release download "$HANDOFF_TAG" --repo "$GITHUB_REPOSITORY" --dir data/handoff
+          autoclipper handoff data/handoff
       - run: autoclipper run
         env:
           NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY || secrets.Nvidiaapi || secrets.Nvidiakey }}
