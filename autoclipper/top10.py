@@ -350,7 +350,7 @@ def _same_fact(a: str, b: str) -> bool:
     """Two narration lines that tell the viewer the same thing: most of the shorter one's words
     are in the other, and neither carries a figure the other contradicts ("Trailer 1 drew 93
     million views" and "Trailer 2 drew 475 million views" are two facts)."""
-    m, n = (set(re.findall(r"\d[\d,.]*\d|\d", s)) for s in (a, b))
+    m, n = (set(re.findall(r"\d[\d.]*\d|\d", s.replace(",", ""))) for s in (a, b))
     if m and n and not (m <= n or n <= m):
         return False
     x, y = _keywords(a), _keywords(b)

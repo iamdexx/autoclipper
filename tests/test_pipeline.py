@@ -1905,6 +1905,9 @@ def test_two_lines_telling_the_same_fact_are_recognised():
     a = "Grand Theft Auto VI launches on November 19, 2026 after two delays."
     assert top10._same_fact(a, "After two delays the game launches November 19, 2026.")
     assert not top10._same_fact(a, "Dan Houser left Rockstar in 2020 after two decades.")
+    assert top10._same_fact(
+        "Rockstar grew to 4,711 employees.", "Rockstar's staff grew to 4711 employees."
+    )
     assert not top10._same_fact(
         "Trailer 1 drew 93 million views in 24 hours.",
         "Trailer 2 drew 475 million views in 24 hours.",
