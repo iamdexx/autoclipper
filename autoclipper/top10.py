@@ -132,8 +132,10 @@ line is shown on screen a few words at a time, and "seventy-five million" alone 
 Return ONLY JSON:
 {{"title": "<the question or claim, max 9 words, Title Case>",
   "intro": "<the puzzle in one sentence, max 18 words>",
-  "footage": "<only when the story is about ONE video game, film or show: its name plus
-              'gameplay no commentary' or 'official trailer'. Otherwise an empty string>",
+  "footage": "<only when the story is about ONE video game, film or show: for a game its name
+              plus 'gameplay no commentary' (never a trailer: trailers are adverts, title cards
+              and letterboxed cuts), for a film or show its name plus 'official trailer'.
+              Otherwise an empty string>",
   "hashtags": ["#a", "#b", "#c", "#d"],
   "entries": [{{"rank": {n}, "name": "<beat label, max 4 words>",
                 "line": "<1-2 sentences, 14-26 words, one concrete fact>",

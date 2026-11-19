@@ -2125,3 +2125,16 @@ def test_a_clip_with_no_face_to_crop_to_shows_the_whole_picture(tmp_path, monkey
     assert render._frame(cfg, tmp_path / "v.mp4", 0.0, 6.0) == {"mode": "blur", "focus": None}
     monkeypatch.setattr(reframe, "focus_x", lambda *a: 0.8)
     assert render._frame(cfg, tmp_path / "v.mp4", 0.0, 6.0) == {"mode": "crop", "focus": 0.8}
+
+
+def test_explainer_shows_a_game_over_its_gameplay_not_its_trailer():
+    # trailer uploads of GTA 6 passed 20 of 71 frame checks over four runs and made no video;
+    # gameplay passed 15 of 16 and was posted
+    from autoclipper import top10
+
+    p = top10.EXPLAINER_PROMPT
+    game = p[p.index('"footage"') : p.index('"hashtags"')]
+    assert (
+        "for a game its name\n              plus 'gameplay no commentary' (never a trailer" in game
+    )
+    assert "for a film or show its name plus 'official trailer'" in game
