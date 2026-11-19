@@ -1894,3 +1894,11 @@ def test_magpie_is_given_numerals_and_dates_it_reads_right():
     assert narrate.spoken("I saw 4,711 employees. V is a letter.") == (
         "I saw 4,711 employees. V is a letter."
     )
+
+
+def test_two_lines_telling_the_same_fact_are_recognised():
+    from autoclipper import top10
+
+    a = "Grand Theft Auto VI launches on November 19, 2026 after two delays."
+    assert top10._same_fact(a, "After two delays the game launches November 19, 2026.")
+    assert not top10._same_fact(a, "Dan Houser left Rockstar in 2020 after two decades.")
