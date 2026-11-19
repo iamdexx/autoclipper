@@ -71,16 +71,18 @@ def enqueue(
     hook: str = "",
     creator: str = "",
     hashtags: list[str] | None = None,
+    name: str = "",
 ) -> Item:
     """Copy `video` into the queue (the render dir is per-run scratch; the queue dir is what the
-    workflow persists between runs)."""
-    qid = f"{int(time.time())}-{video.stem}"[:80]
+    workflow persists between runs), as `name`.mp4 when one is given."""
+    queued = f"{name}{video.suffix}" if name else video.name
+    qid = f"{int(time.time())}-{Path(queued).stem}"[:80]
     d = _dir(cfg) / qid
     d.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(video, d / video.name)
+    shutil.copy2(video, d / queued)
     it = Item(
         id=qid,
-        video=video.name,
+        video=queued,
         kind=kind,
         source=source,
         score=float(score),
@@ -91,7 +93,7 @@ def enqueue(
         added=time.time(),
     )
     _save(cfg, it)
-    log.info("queued %s (score %.2f): %s", video.name, it.score, meta.title)
+    log.info("queued %s (score %.2f): %s", queued, it.score, meta.title)
     return it
 
 
@@ -123,11 +125,12 @@ def handoff(folder: Path, cfg: Config, state: State | None = None) -> Item | Non
         return None
     # the file's own content names it: two hand-offs may both be called final.mp4, and
     # everything after this (the queue, a public copy for Instagram) goes by the file's name
+    sha = hashlib.sha1()
     with video.open("rb") as f:
-        digest = hashlib.file_digest(f, "sha1").hexdigest()[:8]
-    if not video.stem.endswith(f"-{digest}"):
-        video = video.rename(video.with_name(f"{video.stem}-{digest}.mp4"))
-    source = f"handoff:{video.stem}"
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            sha.update(chunk)
+    name = f"{video.stem}-{sha.hexdigest()[:8]}"
+    source = f"handoff:{name}"
     posted = state is not None and any(
         p.get("video") == source and "error" not in p and "skipped" not in p
         for p in state.data["posts"]
@@ -139,7 +142,15 @@ def handoff(folder: Path, cfg: Config, state: State | None = None) -> Item | Non
         log.error("handoff %s refused by the output check", video.name)
         return None
     return enqueue(
-        video, kind, source, HANDOFF_SCORE, meta, cfg, hook=meta.title, hashtags=meta.hashtags
+        video,
+        kind,
+        source,
+        HANDOFF_SCORE,
+        meta,
+        cfg,
+        hook=meta.title,
+        hashtags=meta.hashtags,
+        name=name,
     )
 
 
