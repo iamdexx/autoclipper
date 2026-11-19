@@ -151,7 +151,8 @@ top10:
                         # countdown (Top 10 with rank badges + narrator) | listicle (photos + narrator)
   narrate: true         # ranking: Liam voices a hook + one line per clip (false = clip audio only)
   items: 7              # explainer: beats (~50s); ranking ~6; countdown 10
-  open_topic_every: 3   # explainer: every 3rd one is on any subject (history, science, ...), the rest follow the topic mix
+  open_topic_every: 0   # explainer: every Nth one is on any subject (history, science, ...); 0 = never
+  focus_only: true      # explainer: GTA 6 pillars only (clips still follow the whole topic mix)
   item_min_s: 3.5
   outro_s: 2.0          # #1's footage plays on (its audio back up) this long after the last line
   listicle_outro_s: 0.8 # listicle: the last photo holds this long after the last word
