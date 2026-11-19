@@ -73,7 +73,12 @@ def process_video(
     state.mark_video(meta.id, "downloading", title=meta.title, creator=creator.name)
     src = ingest.download(meta.url, vdir)
     segments = ingest.transcribe(src, cfg, vdir / "transcript.json")
-    why = source_problem(src, meta, segments, cfg, vdir / "transcript.json")
+    try:
+        why = source_problem(src, meta, segments, cfg, vdir / "transcript.json")
+    except rank.Unavailable as e:
+        log.warning("%s: %s; nothing cut, the video is retried on a later run", meta.id, e)
+        state.forget_video(meta.id)
+        return []
     if why:
         log.info("skipping %s (%s): %s", meta.id, meta.title, why)
         state.mark_video(meta.id, "skipped_source", title=meta.title, creator=creator.name, why=why)
@@ -142,8 +147,8 @@ def process_video(
 def source_problem(src: Path, meta, segments, cfg: Config, transcript: Path) -> str:
     """Why this video is not worth cutting from ('' = it is): wrong language, nobody on camera,
     or the source review (review.py) found a slideshow, a synthetic voice, burned-in captions or
-    another channel's overlays. A review that could not be run lets the source through; every
-    finished clip still has to pass its own review."""
+    another channel's overlays or watermark. Raises rank.Unavailable when that review could not
+    be run: clips cut from an unchecked source mostly fail the finished-video review anyway."""
     t = cfg.trends
     if t.languages:
         lang, prob = ingest.language(transcript)
@@ -156,6 +161,8 @@ def source_problem(src: Path, meta, segments, cfg: Config, transcript: Path) -> 
     if cfg.review.enabled:
         said = " ".join(s.text for s in segments)
         v = review.source(src, meta.title, meta.uploader or "", said, cfg)
+        if v.ok is None:
+            raise rank.Unavailable(f"source review could not run ({v.note})")
         if v.ok is False:
             return f"source review: {', '.join(v.problems)} ({v.note})"
     return ""
@@ -257,6 +264,9 @@ def run_trends(cfg: Config, state: State, do_publish: bool = True) -> int:
             clips = process_video(
                 src.url, creator, cfg, state, do_publish=do_publish, pillar=tp.pillar or None
             )
+            if not state.seen(src.id):  # put back for a later run (a model was unavailable)
+                state.forget_topic("trend", tp.name)
+                continue
             state.mark_topic("trend", tp.name, status="done", video=src.id, clips=len(clips))
             n += 1
         except Exception as e:

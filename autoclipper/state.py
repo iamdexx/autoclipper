@@ -32,6 +32,11 @@ class State:
         if self.data["videos"].pop(video_id, None) is not None:
             self.save()
 
+    def forget_topic(self, kind: str, name: str) -> None:
+        """Make a topic unused again, so a later run can pick it."""
+        if self.data.get("topics", {}).get(kind, {}).pop(name, None) is not None:
+            self.save()
+
     def used_topics(self, kind: str) -> list[str]:
         """Topics already covered for `kind` ('trend' | 'top10'), oldest first."""
         items = self.data.get("topics", {}).get(kind, {})
