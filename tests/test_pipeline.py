@@ -2105,3 +2105,5 @@ def test_a_moment_opens_and_closes_on_whole_sentences(tmp_path):
     cfg.clips.max_len_s = 10
     quoted = [seg(0, "she said “the new map really works.”")]
     assert rank._on_sentences(0, 7, quoted, cfg) == (0, 7)  # a closing curly quote ends one too
+    trailing = [seg(0, "we have a bunch of aircraft so we have a...")]
+    assert rank._on_sentences(0, 10, trailing, cfg) is None  # breaking off is not an ending
