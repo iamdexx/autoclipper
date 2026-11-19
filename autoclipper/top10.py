@@ -508,11 +508,12 @@ class Shot:
 
     clip: Path
     start: float
+    bars: str = ""  # render.letterbox(clip)
 
 
-def _frame(clip: Path, at: float, out: Path) -> Path | None:
+def _frame(clip: Path, at: float, out: Path, bars: str = "") -> Path | None:
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{at:.3f}", "-i", str(clip)]
-    vf = f"{render.SHOT_CROP},scale=-2:720"  # what the viewer will see of it
+    vf = f"{render.shot_view(bars)},scale=-2:720"  # what the viewer will see of it
     subprocess.run(cmd + ["-frames:v", "1", "-vf", vf, "-q:v", "3", str(out)], check=False)
     return out if out.exists() else None
 
@@ -540,18 +541,19 @@ def footage_shots(script: Script, n: int, cfg: Config, dest: Path) -> list[Shot]
             break
         tried.add(src.video_id)
         count = int(narrate.duration(clip) // SHOT_S)
+        bars = render.letterbox(clip)
         # every third stretch first: beats that follow each other should not show one scene
         for at in [i * SHOT_S for k3 in range(3) for i in range(k3, count, 3)]:
             if len(out) >= n:
                 break
             ok = True
             for j, t in enumerate((at + 0.5, at + SHOT_S / 2, at + SHOT_S - 1.5)):
-                f = _frame(clip, t, dest / f"check-{k}-{at:05.0f}-{j}.jpg")
+                f = _frame(clip, t, dest / f"check-{k}-{at:05.0f}-{j}.jpg", bars)
                 if f is None or not review.backdrop(f, script.footage, cfg):
                     ok = False
                     break
             if ok:
-                out.append(Shot(clip, at))
+                out.append(Shot(clip, at, bars))
     return out
 
 
@@ -664,7 +666,7 @@ def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
             at = min(played.get(id(entry), 0.0), max(0.0, SHOT_S - dur))
             played[id(entry)] = at + dur
             render.render_shot(
-                pic.clip, pic.start + at, dur, voice, words, cfg, seg, title, SHOT_S - at
+                pic.clip, pic.start + at, dur, voice, words, cfg, seg, title, SHOT_S - at, pic.bars
             )
         else:
             render.render_still(

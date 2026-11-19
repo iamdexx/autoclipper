@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 from pathlib import Path
 
@@ -410,6 +411,33 @@ SHOT_CROP = "crop=iw:ih*0.78:0:0"
 SHOT_ASPECT = 0.8  # width over height of the part of the footage that is shown (9:16 is 0.5625)
 
 
+def letterbox(clip: Path) -> str:
+    """A crop that takes the black bars off a letterboxed clip (a trailer in a cinema ratio),
+    "" when it has none. Bars are cut off rather than shown: the picture between them is fine."""
+    r = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-i", str(clip), "-vf", "fps=1/4,cropdetect=24:2:0"]
+        + ["-frames:v", "40", "-an", "-f", "null", "-"],
+        capture_output=True,
+        text=True,
+    )
+    found = re.findall(r"crop=(\d+):(\d+):(\d+):(\d+)", r.stderr)
+    size = re.search(r"Stream #0.*Video:.* (\d{3,5})x(\d{3,5})", r.stderr)
+    if not found or not size:
+        return ""
+    w, h = int(size.group(1)), int(size.group(2))
+    # the tallest picture any sampled frame had: a dark scene reads as a bigger bar than there is
+    ch, y = max((int(f[1]), int(f[3])) for f in found)
+    if ch >= h * 0.95 or ch < h * 0.6:
+        return ""
+    return f"crop={w}:{ch}:0:{y}"
+
+
+def shot_view(bars: str = "") -> str:
+    """The filters that leave the part of a footage frame the viewer sees sharp: without its
+    black bars and the game's subtitle strip, the middle SHOT_ASPECT of what is left."""
+    return f"{bars + ',' if bars else ''}{SHOT_CROP},crop='min(iw,ih*{SHOT_ASPECT})':ih"
+
+
 def render_shot(
     clip: Path,
     start: float,
@@ -420,18 +448,19 @@ def render_shot(
     out: Path,
     title: str = "",
     footage_s: float | None = None,
+    bars: str = "",
 ) -> Path:
     """One beat of a story over moving footage: `dur` seconds of `clip` from `start`, its middle
     filling the frame, its own sound off, captions in the global style, narration as the only
     audio. At most `footage_s` seconds of the footage are shown; footage that runs out holds
-    its last frame."""
+    its last frame. `bars`: letterbox() of the clip."""
     out.parent.mkdir(parents=True, exist_ok=True)
     ass_path = out.with_suffix(".ass")
     ass_path.write_text(build_ass(words, title, dur, cfg, badge=""))
     vf = (
         # the middle 4:5 of the picture across the full width, over a blurred copy of itself:
         # filling the tall screen with the picture alone cut a third-person character off
-        f"[0:v]{SHOT_CROP},fps={FPS},split=2[b0][f0];"
+        f"[0:v]{bars + ',' if bars else ''}{SHOT_CROP},fps={FPS},split=2[b0][f0];"
         f"[b0]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=24:6[bg];"
         f"[f0]crop='min(iw,ih*{SHOT_ASPECT})':ih,scale={W}:-2:flags=lanczos[fg];"
         f"[bg][fg]overlay=0:(H-h)/2,setsar=1,tpad=stop_mode=clone:stop_duration={dur:.3f},"

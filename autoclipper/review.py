@@ -170,9 +170,11 @@ story about: {subject}
 Is it a clean picture of that subject (for a game: the game itself being played or one of its
 scenes)? A frame with a person in a webcam box, a channel's logo, name or @handle, captions or
 other added text, subtitles or button prompts, black bars above and below the picture, a menu,
-a loading or title screen, a screenshot
-of a post or an article, or a frame of something else is a "no".
-Return JSON only: {{"shows": "<what the frame shows, a few words>", "fits": true|false}}"""
+a loading or title screen, an advert or a product shot, a screenshot of a post or an article, or
+a frame of something else is a "no". Any scene of the game itself with none of those is a "yes",
+whatever happens in it: the narration does not have to be about that scene.
+Return JSON only: {{"shows": "<what the frame shows, a few words>", "fits": true|false,
+"why": "<when false: which of the above it has>"}}"""
 
 
 def backdrop(path: Path, subject: str, cfg: Config) -> bool:
@@ -184,7 +186,8 @@ def backdrop(path: Path, subject: str, cfg: Config) -> bool:
         log.warning("footage check could not run (%s)", e)
         return False
     fits = j.get("fits") is True
-    log.info("footage frame %s: %s", "fits" if fits else "does NOT fit", j.get("shows"))
+    why = "" if fits else f" ({j.get('why') or 'no reason given'})"
+    log.info("footage frame %s: %s%s", "fits" if fits else "does NOT fit", j.get("shows"), why)
     return fits
 
 
