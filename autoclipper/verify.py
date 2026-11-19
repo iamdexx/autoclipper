@@ -115,9 +115,33 @@ def wikipedia(query: str, n: int = 3) -> list[Evidence]:
     ]
 
 
+_STOP = set(
+    "the a an of in on at to and or vs for with is are was why how what who from by".split()
+)
+
+
+def _words(s: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", s.lower()) if len(w) > 1 and w not in _STOP}
+
+
+def names_query(page: dict, query: str) -> bool:
+    """Whether a search hit is an article about something the query names: its title or a
+    redirect to it shares a word with the query. A full-text search also returns articles that
+    merely cite the words somewhere (a 'GTA 6 Review Roundup' query hit 'Space Invaders')."""
+    names = [page.get("title", ""), *(r.get("title", "") for r in page.get("redirects") or [])]
+    words = _words(query)
+    if not words:  # 'The Who', 'X': the whole query is the name
+        key = re.sub(r"[^a-z0-9]+", " ", query.lower()).strip()
+        return bool(key) and any(
+            re.sub(r"[^a-z0-9]+", " ", n.lower()).strip() == key for n in names
+        )
+    return bool(words & _words(" ".join(names)))
+
+
 def wiki_extract(query: str, chars: int = 9000) -> list[Evidence]:
     """The opening of the best-matching Wikipedia article, as sentences: something a claim can
-    actually be checked against, unlike a one-line search snippet."""
+    actually be checked against, unlike a one-line search snippet. [] when the best match is
+    not about anything the query names."""
     r = requests.get(
         "https://en.wikipedia.org/w/api.php",
         params={
@@ -125,9 +149,10 @@ def wiki_extract(query: str, chars: int = 9000) -> list[Evidence]:
             "generator": "search",
             "gsrsearch": query,
             "gsrlimit": 1,
-            "prop": "extracts",
+            "prop": "extracts|redirects",
             "explaintext": 1,
             "exlimit": 1,
+            "rdlimit": "max",
             "format": "json",
             "utf8": 1,
         },
@@ -137,6 +162,9 @@ def wiki_extract(query: str, chars: int = 9000) -> list[Evidence]:
     r.raise_for_status()
     out = []
     for p in (r.json().get("query") or {}).get("pages", {}).values():
+        if not names_query(p, query):
+            log.info("wikipedia: %r is not about %r; not using it", p.get("title"), query)
+            continue
         url = "https://en.wikipedia.org/wiki/" + urllib.parse.quote(p["title"].replace(" ", "_"))
         for para in (p.get("extract") or "")[:chars].split("\n"):
             para = para.strip()
