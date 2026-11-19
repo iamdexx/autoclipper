@@ -325,13 +325,15 @@ def fact_check(script: Script, cfg: Config) -> list[verify.Check]:
 
 def verified_script(topic: str, angle: str, cfg: Config, vdir: Path) -> Script:
     """Write a script, drop entries that fail the fact-check, refill from a fresh draft (up to
-    verify.max_rounds), re-rank 10..1. Raises if fewer than verify.min_entries survive."""
+    verify.max_rounds), re-rank 10..1. Raises if fewer than verify.min_entries survive, or if a
+    story's own title and opening line fail."""
     v = cfg.verify
     strict = v.strict or v.strict_top10
     story = cfg.top10.style == "explainer"
     script = first = write_script(topic, angle, cfg)
     if not v.enabled:
         return script
+    opened = bool(first.intro)
     vdir.mkdir(parents=True, exist_ok=True)
     report: list[dict] = []
     keep: list[Entry] = []
@@ -364,6 +366,10 @@ def verified_script(topic: str, angle: str, cfg: Config, vdir: Path) -> Script:
         raise RuntimeError(
             f"fact-check: only {len(keep)} verified entries for {topic!r} (need {v.min_entries})"
         )
+    if story and opened and not first.intro:
+        # a story's title is its claim, shown on screen, spoken and posted: it cannot be kept
+        # once fact_check has refused it together with the opening line
+        raise RuntimeError(f"fact-check: the title {first.title!r} is not supported")
     keep = keep[-cfg.top10.items :]
     for i, e in enumerate(keep):
         e.rank = len(keep) - i
