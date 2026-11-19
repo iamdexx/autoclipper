@@ -132,7 +132,9 @@ def names_query(page: dict, query: str) -> bool:
     words = _words(query)
     if not words:  # 'The Who', 'X': the whole query is the name
         key = re.sub(r"[^a-z0-9]+", " ", query.lower()).strip()
-        return any(re.sub(r"[^a-z0-9]+", " ", n.lower()).strip() == key for n in names)
+        return bool(key) and any(
+            re.sub(r"[^a-z0-9]+", " ", n.lower()).strip() == key for n in names
+        )
     return bool(words & _words(" ".join(names)))
 
 

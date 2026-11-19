@@ -144,6 +144,7 @@ def test_wiki_extract_skips_article_that_only_cites_the_query(monkeypatch):
     pages["1"] = _wiki_page("The Who")
     assert verify.wiki_extract("The Who")
     assert not verify.names_query(_wiki_page("The Who"), "Who")
+    assert not verify.names_query(_wiki_page("Tokyo", ["東京"]), "北京")
 
 
 def test_gather_survives_failing_sources(monkeypatch):
