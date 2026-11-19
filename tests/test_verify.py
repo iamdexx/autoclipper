@@ -484,3 +484,19 @@ def test_explainer_is_checked_without_video_titles_and_drops_filler(tmp_path, mo
     assert "bone needle" not in seen  # the photo search is not what gets fact-checked
     assert [c.verdict for c in checks[:2]] == ["supported", "unsupported"]
     assert "filler" in checks[1].note and script.intro
+
+
+def test_a_story_whose_title_fails_the_fact_check_is_not_made(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.top10.style, cfg.verify.max_rounds = "explainer", 1
+    monkeypatch.setattr(top10, "write_script", lambda *a, **k: _script())
+    monkeypatch.setattr(top10, "article_for", lambda *a, **k: [])
+
+    def check(claims, c, **k):  # every beat holds; the title with its opening line does not
+        out = [verify.Check(cl, "supported", 0.9) for cl, _ in claims]
+        out[-1] = verify.Check(claims[-1][0], "unsupported", 0.9)
+        return out
+
+    monkeypatch.setattr(verify, "check_claims", check)
+    with pytest.raises(RuntimeError, match="title 'Top 10' is not supported"):
+        top10.verified_script("nfl", "", cfg, tmp_path)
