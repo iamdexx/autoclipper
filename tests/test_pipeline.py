@@ -1900,7 +1900,8 @@ def test_story_footage_is_moving_stretches_checked_start_middle_and_end(tmp_path
         )
         for t in (1.5, 2.5)
     )
-    assert first == held  # testsrc2 moves every frame: the picture stopped at 1s
+    # testsrc2 moves every frame: the picture stopped at 1s (encoding leaves a little noise)
+    assert sum(abs(a - b) for a, b in zip(first, held, strict=True)) / len(first) < 2
     # a source with no clean frame is not asked for again: the next one is tried
     monkeypatch.setattr(review, "backdrop", lambda p, subject, cfg: False)
     asked["skips"] = []
