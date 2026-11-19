@@ -326,7 +326,7 @@ def fact_check(script: Script, cfg: Config) -> list[verify.Check]:
 def verified_script(topic: str, angle: str, cfg: Config, vdir: Path) -> Script:
     """Write a script, drop entries that fail the fact-check, refill from a fresh draft (up to
     verify.max_rounds), re-rank 10..1. Raises if fewer than verify.min_entries survive, or if a
-    story's own title and opening line fail."""
+    story's opening line fails and its title, checked by itself, fails too."""
     v = cfg.verify
     strict = v.strict or v.strict_top10
     story = cfg.top10.style == "explainer"
@@ -367,9 +367,17 @@ def verified_script(topic: str, angle: str, cfg: Config, vdir: Path) -> Script:
             f"fact-check: only {len(keep)} verified entries for {topic!r} (need {v.min_entries})"
         )
     if story and opened and not first.intro:
-        # a story's title is its claim, shown on screen, spoken and posted: it cannot be kept
-        # once fact_check has refused it together with the opening line
-        raise RuntimeError(f"fact-check: the title {first.title!r} is not supported")
+        # the opening line was refused together with the title. The title is shown on screen,
+        # spoken and posted, so it is checked again by itself: the story goes on without its
+        # opening line only when the title holds
+        (c,) = verify.check_claims(
+            [(first.title, topic)], cfg, titles=False, shared=article_for(topic, cfg)
+        )
+        report += verify.dump([c])
+        (vdir / "factcheck.json").write_text(json.dumps(report, indent=2))
+        log.info("fact-check title -> %s (%.2f) %s", c.verdict, c.confidence, c.note)
+        if not verify.passes(c, cfg, strict=strict):
+            raise RuntimeError(f"fact-check: the title {first.title!r} is not supported")
     keep = keep[-cfg.top10.items :]
     for i, e in enumerate(keep):
         e.rank = len(keep) - i

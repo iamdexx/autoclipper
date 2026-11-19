@@ -492,7 +492,11 @@ def test_a_story_whose_title_fails_the_fact_check_is_not_made(tmp_path, monkeypa
     monkeypatch.setattr(top10, "write_script", lambda *a, **k: _script())
     monkeypatch.setattr(top10, "article_for", lambda *a, **k: [])
 
+    title_holds = False
+
     def check(claims, c, **k):  # every beat holds; the title with its opening line does not
+        if len(claims) == 1:  # the title by itself
+            return [verify.Check(claims[0][0], "supported" if title_holds else "unsupported", 0.9)]
         out = [verify.Check(cl, "supported", 0.9) for cl, _ in claims]
         out[-1] = verify.Check(claims[-1][0], "unsupported", 0.9)
         return out
@@ -500,3 +504,6 @@ def test_a_story_whose_title_fails_the_fact_check_is_not_made(tmp_path, monkeypa
     monkeypatch.setattr(verify, "check_claims", check)
     with pytest.raises(RuntimeError, match="title 'Top 10' is not supported"):
         top10.verified_script("nfl", "", cfg, tmp_path)
+    title_holds = True  # only the opening line was wrong: the story is told without it
+    script = top10.verified_script("nfl", "", cfg, tmp_path)
+    assert script.title == "Top 10" and script.intro == "" and script.entries
