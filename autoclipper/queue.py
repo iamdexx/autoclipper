@@ -4,6 +4,7 @@ are never picked age out, so the queue holds the strongest recent candidates, no
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import shutil
@@ -70,16 +71,18 @@ def enqueue(
     hook: str = "",
     creator: str = "",
     hashtags: list[str] | None = None,
+    name: str = "",
 ) -> Item:
     """Copy `video` into the queue (the render dir is per-run scratch; the queue dir is what the
-    workflow persists between runs)."""
-    qid = f"{int(time.time())}-{video.stem}"[:80]
+    workflow persists between runs), as `name`.mp4 when one is given."""
+    queued = f"{name}{video.suffix}" if name else video.name
+    qid = f"{int(time.time())}-{Path(queued).stem}"[:80]
     d = _dir(cfg) / qid
     d.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(video, d / video.name)
+    shutil.copy2(video, d / queued)
     it = Item(
         id=qid,
-        video=video.name,
+        video=queued,
         kind=kind,
         source=source,
         score=float(score),
@@ -90,8 +93,65 @@ def enqueue(
         added=time.time(),
     )
     _save(cfg, it)
-    log.info("queued %s (score %.2f): %s", video.name, it.score, meta.title)
+    log.info("queued %s (score %.2f): %s", queued, it.score, meta.title)
     return it
+
+
+HANDOFF_SCORE = 7.0  # where a finished video handed to a run stands in the queue (a story's score)
+
+
+def handoff(folder: Path, cfg: Config, state: State | None = None) -> Item | None:
+    """Queue a video that was built outside a run: `folder` holds one .mp4 and a post.json with
+    its title, description, hashtags, `said` (every word it speaks) and `kind`. It gets no
+    shortcut: the output check runs here, and the editor's review and the posting budget apply
+    when the queue is drained, as for any video. None when it is refused, queued or posted."""
+    from . import qa
+
+    try:
+        j = json.loads((folder / "post.json").read_text())
+        (video,) = sorted(folder.glob("*.mp4"))
+        meta = PostMeta(
+            title=str(j["title"]).strip(),
+            description=str(j["description"]).strip(),
+            hashtags=[str(h) for h in j.get("hashtags", [])],
+            **({"category": str(j["category"])} if j.get("category") else {}),
+        )
+        said, kind = str(j["said"]).strip(), str(j.get("kind") or "top10")
+    except Exception as e:
+        log.error("handoff %s refused: %s", folder, e)
+        return None
+    if not meta.title or not said:
+        log.error("handoff %s refused: no title or no words", folder)
+        return None
+    # the file's content alone names it: two hand-offs may both be called final.mp4, one video
+    # may come back under another name, and the queue and Instagram's public copy go by name
+    sha = hashlib.sha1()
+    with video.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            sha.update(chunk)
+    name = f"handoff-{sha.hexdigest()[:12]}"  # whatever the file was called
+    source = f"handoff:{sha.hexdigest()[:12]}"
+    posted = state is not None and any(
+        p.get("video") == source and "error" not in p and "skipped" not in p
+        for p in state.data["posts"]
+    )
+    if posted or any(it.source == source for it in items(cfg)):
+        log.info("handoff %s is already queued or posted", video.name)
+        return None
+    if not qa.gate(video, cfg, said, kind=kind):
+        log.error("handoff %s refused by the output check", video.name)
+        return None
+    return enqueue(
+        video,
+        kind,
+        source,
+        HANDOFF_SCORE,
+        meta,
+        cfg,
+        hook=meta.title,
+        hashtags=meta.hashtags,
+        name=name,
+    )
 
 
 def items(cfg: Config) -> list[Item]:

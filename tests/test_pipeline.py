@@ -2030,6 +2030,43 @@ def test_explainer_focus_only_takes_topics_from_the_main_pillars(tmp_path, monke
     assert [p.name for p in cfg.trends.pillars] == ["map", "consoles"]  # clips keep the whole mix
 
 
+def test_a_handed_off_video_is_checked_and_queued_once(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    folder = tmp_path / "handoff"
+    folder.mkdir()
+    (folder / "story.mp4").write_bytes(b"x")
+    post = {"title": "How It Happened", "description": "d", "hashtags": ["#a"], "said": "words"}
+    (folder / "post.json").write_text(json.dumps(post))
+    seen = []
+    monkeypatch.setattr(qa, "gate", lambda v, c, said, kind: seen.append((said, kind)) or False)
+    assert queue.handoff(folder, cfg) is None and not queue.items(cfg)  # the output check decides
+    monkeypatch.setattr(qa, "gate", lambda v, c, said, kind: True)
+    it = queue.handoff(folder, cfg)
+    assert seen == [("words", "top10")]
+    assert it.source.startswith("handoff:") and it.video.startswith("handoff-")
+    assert (it.kind, it.meta.title) == ("top10", "How It Happened")
+    assert queue.handoff(folder, cfg) is None and len(queue.items(cfg)) == 1  # not queued twice
+    assert [f.name for f in folder.glob("*.mp4")] == ["story.mp4"]  # the folder is left as is
+    (folder / "story.mp4").rename(folder / it.video)
+    assert queue.handoff(folder, cfg) is None  # the same video under another name is the same
+    (folder / it.video).rename(folder / "story.mp4")
+    queue.remove(cfg, it)
+    state = State(tmp_path / "state.json")
+    state.record_post(it.source, "story.mp4", "youtube", {"error": "quota"})
+    again = queue.handoff(folder, cfg, state)  # an upload that failed may be handed in again
+    assert again is not None
+    queue.remove(cfg, again)
+    state.record_post(it.source, "story.mp4", "youtube", {"id": "abc"})
+    assert queue.handoff(folder, cfg, state) is None  # nor posted twice
+    (folder / "story.mp4").write_bytes(b"another video under the same name")
+    other = queue.handoff(folder, cfg, state)
+    assert other is not None and other.source != it.source
+    assert other.video != it.video  # so one cannot be served in place of the other
+    queue.remove(cfg, other)
+    (folder / "post.json").write_text(json.dumps({**post, "said": ""}))
+    assert queue.handoff(folder, cfg) is None  # nothing to check the captions against
+
+
 def test_letterbox_bars_are_cut_off_a_shot(tmp_path):
     def clip(name, vf):
         out = tmp_path / name
