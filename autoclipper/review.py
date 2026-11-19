@@ -38,6 +38,8 @@ Return ONLY JSON:
   "synthetic_voice": <true if the transcript reads like text-to-speech narration of an article rather than a person talking>,
   "burned_captions": <true if the video already has captions or large text burned into most frames>,
   "overlays": <true if subscribe/like buttons, 'follow' animations, donation or chat pop-ups, or another brand's banner appear. The creator's own webcam inset of themselves and the game's own HUD are not overlays>,
+  "watermark": <true if a channel's or brand's logo, name or @handle sits in the same corner or edge of the picture in several frames (a watermark). The game's own HUD and logos inside the footage itself are not watermarks>,
+  "screenshot_frames": <how many of the {n} frames are filled or covered by a screenshot of a social-media post, an article or a text card, as a number>,
   "english": <true if the speech is English a general audience can follow>,
   "note": "<one sentence>"}}
 
@@ -156,11 +158,16 @@ def photo(path: Path, line: str, name: str, cfg: Config) -> bool:
     return fits
 
 
+# a source where this share of sampled frames is somebody's post or an article: clips cut from it
+# carry that account's name and logo, and fail the finished-video review
+MAX_SCREENSHOT_SHARE = 0.2
+
+
 def source(video: Path, title: str, channel: str, said: str, cfg: Config) -> Verdict:
     """Is this a video worth cutting from: a real person talking in English, with a clean
     picture? ok=None when the check could not be run."""
     try:
-        pics = frames(video, max(cfg.review.frames, 12), width=320)
+        pics = frames(video, max(cfg.review.frames, 12), width=640)  # a corner mark is small
         j = _ask(
             SOURCE_PROMPT.format(n=len(pics), title=title, channel=channel, said=said[:3000]),
             pics,
@@ -170,13 +177,17 @@ def source(video: Path, title: str, channel: str, said: str, cfg: Config) -> Ver
         log.warning("source review could not run (%s)", e)
         return Verdict(None, note=str(e)[:200])
     problems = []
-    if j.get("presenter") == "slideshow":
+    try:
+        shots = float(j.get("screenshot_frames") or 0)
+    except (TypeError, ValueError):
+        shots = 0
+    if j.get("presenter") == "slideshow" or shots >= MAX_SCREENSHOT_SHARE * len(pics):
         problems.append("slideshow_of_text")
     if j.get("synthetic_voice") is True and j.get("presenter") != "on_camera":
         problems.append("synthetic_voice")
     if j.get("burned_captions") is True:
         problems.append("burned_captions")
-    if j.get("overlays") is True:
+    if j.get("overlays") is True or j.get("watermark") is True:
         problems.append("foreign_overlays")
     if j.get("english") is False:
         problems.append("not_english")

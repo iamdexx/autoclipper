@@ -1401,8 +1401,9 @@ def test_source_in_another_language_or_with_nobody_on_camera_is_skipped(tmp_path
     verdict = review.Verdict(False, problems=["synthetic_voice"], note="tts over articles")
     monkeypatch.setattr(review, "source", lambda *a: verdict)
     assert "synthetic_voice" in why()
-    verdict.ok = None  # the reviewer is down: the finished clips are still reviewed later
-    assert why() == ""
+    verdict.ok = None  # the reviewer is down: the source waits for a run where it can be checked
+    with pytest.raises(rank.Unavailable):
+        why()
 
 
 def test_video_made_while_the_editor_model_is_down_is_retried(tmp_path, monkeypatch):
@@ -1514,6 +1515,16 @@ def test_source_review_does_not_count_the_creators_own_webcam_as_an_overlay(tmp_
     # every xQc GTA 6 stream was skipped because the facecam inset was read as an overlay
     assert "webcam inset of themselves" in prompts[0] and "are not overlays" in prompts[0]
     answer["overlays"] = True
+    v = review.source(f, "GTA 6 Playthrough", "xQc", "said", cfg)
+    assert v.ok is False and v.problems == ["foreign_overlays"]
+    # so do tweets and articles filling a good share of the frames (1 frame is sampled here)
+    answer.update(overlays=False, screenshot_frames=1)
+    v = review.source(f, "GTA 6 Playthrough", "xQc", "said", cfg)
+    assert v.ok is False and v.problems == ["slideshow_of_text"]
+    answer.update(screenshot_frames="none")
+    assert review.source(f, "GTA 6 Playthrough", "xQc", "said", cfg).ok is True
+    # a channel's logo in the corner fails every clip cut from the video, so it fails the source
+    answer.update(overlays=False, watermark=True)
     v = review.source(f, "GTA 6 Playthrough", "xQc", "said", cfg)
     assert v.ok is False and v.problems == ["foreign_overlays"]
 
