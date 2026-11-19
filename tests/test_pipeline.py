@@ -1466,15 +1466,23 @@ def test_review_verdict_needs_a_clean_checklist_and_a_high_score(tmp_path, monke
     monkeypatch.setattr(review, "frames", lambda *a, **k: [b"jpg"])
     monkeypatch.setenv("GEMINI_API_KEY", "k")
     answer = {"problems": [], "score": 8, "note": "n"}
-    models = []
+    models, prompts = [], []
 
     def gemini(p, m, images=None):
         models.append(m)
+        prompts.append(p)
         return json.dumps(answer)
 
     monkeypatch.setattr(rank, "_call_gemini", gemini)
     cfg.llm_provider, cfg.llm_model = "anthropic", "claude-x"  # not a model Gemini serves
+    cfg.look.watermark = "@Clipverse-HQ"
     assert review.video(f, "clip", cfg).ok is True and models == [None]
+    # the reviewer took our own handle for another channel's watermark (foreign_overlays)
+    assert 'our channel handle "@Clipverse-HQ"' in prompts[0]
+    assert "Our own elements are never a problem" in prompts[0]
+    cfg.look.watermark = ""
+    review.video(f, "clip", cfg)
+    assert "no watermark" in prompts[1] and "@Clipverse-HQ" not in prompts[1]
     answer["score"] = 6
     assert review.video(f, "clip", cfg).ok is False
     answer.update(score=9, problems=["foreign_overlays"])
@@ -1483,6 +1491,30 @@ def test_review_verdict_needs_a_clean_checklist_and_a_high_score(tmp_path, monke
     monkeypatch.delenv("GEMINI_API_KEY")
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     assert review.video(f, "clip", cfg).ok is None  # no reviewer is not a pass
+
+
+def test_source_review_does_not_count_the_creators_own_webcam_as_an_overlay(tmp_path, monkeypatch):
+    from autoclipper import review
+
+    cfg = _cfg(tmp_path)
+    f = tmp_path / "s.mp4"
+    f.write_bytes(b"x")
+    monkeypatch.setattr(review, "frames", lambda *a, **k: [b"jpg"])
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    answer = {"presenter": "on_camera", "overlays": False, "english": True, "note": "n"}
+    prompts = []
+
+    def gemini(p, m, images=None):
+        prompts.append(p)
+        return json.dumps(answer)
+
+    monkeypatch.setattr(rank, "_call_gemini", gemini)
+    assert review.source(f, "GTA 6 Playthrough", "xQc", "said", cfg).ok is True
+    # every xQc GTA 6 stream was skipped because the facecam inset was read as an overlay
+    assert "webcam inset of themselves" in prompts[0] and "are not overlays" in prompts[0]
+    answer["overlays"] = True
+    v = review.source(f, "GTA 6 Playthrough", "xQc", "said", cfg)
+    assert v.ok is False and v.problems == ["foreign_overlays"]
 
 
 def test_explainer_is_built_from_photos_with_its_title_and_never_thumbnails(tmp_path, monkeypatch):

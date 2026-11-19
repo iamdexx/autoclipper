@@ -37,7 +37,7 @@ Return ONLY JSON:
 {{"presenter": "<'on_camera' if a real person is filmed talking in a good share of the frames; 'voice_over' if it is footage or gameplay with no person filmed; 'slideshow' if it is mostly screenshots of articles, text cards or still images>",
   "synthetic_voice": <true if the transcript reads like text-to-speech narration of an article rather than a person talking>,
   "burned_captions": <true if the video already has captions or large text burned into most frames>,
-  "overlays": <true if subscribe/like buttons, 'follow' animations or another brand's banner appear>,
+  "overlays": <true if subscribe/like buttons, 'follow' animations, donation or chat pop-ups, or another brand's banner appear. The creator's own webcam inset of themselves and the game's own HUD are not overlays>,
   "english": <true if the speech is English a general audience can follow>,
   "note": "<one sentence>"}}
 
@@ -47,8 +47,8 @@ TRANSCRIPT START:
 
 VIDEO_PROMPT = """These are {n} frames sampled evenly, in order, from a finished vertical short our
 channel is about to publish, followed by everything said in it. Our own elements are: one
-caption line in the lower middle, a small title at the top for the first seconds, and a small
-"@" watermark in a top corner. Judge it the way a viewer who likes the subject would, strictly
+caption line in the lower middle, a small title at the top for the first seconds, and {mark}.
+Our own elements are never a problem. Judge it the way a viewer who likes the subject would, strictly
 from what you see and read. Be hard to please: most videos should not pass.
 
 {format}
@@ -182,6 +182,13 @@ def source(video: Path, title: str, channel: str, said: str, cfg: Config) -> Ver
     return Verdict(not problems, problems=problems, note=str(j.get("note", ""))[:300])
 
 
+def _own_mark(cfg: Config) -> str:
+    """How the reviewer is told about our handle, so it is not taken for another channel's."""
+    if not cfg.look.watermark:
+        return "no watermark"
+    return f'our channel handle "{cfg.look.watermark}" as a small watermark in a top corner'
+
+
 def video(path: Path, kind: str, cfg: Config) -> Verdict:
     """The finished video against the viewer's checklist; the report lands in <video>.review.json.
     ok=None when the review could not be run."""
@@ -191,7 +198,10 @@ def video(path: Path, kind: str, cfg: Config) -> Verdict:
         pics = frames(path, cfg.review.frames)
         j = _ask(
             VIDEO_PROMPT.format(
-                n=len(pics), format=_FORMATS.get(kind, _FORMATS["clip"]), said=said[:6000]
+                n=len(pics),
+                format=_FORMATS.get(kind, _FORMATS["clip"]),
+                said=said[:6000],
+                mark=_own_mark(cfg),
             ),
             pics,
             cfg,
