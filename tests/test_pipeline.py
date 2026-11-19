@@ -1877,3 +1877,13 @@ def test_explainer_beats_without_a_photo_get_checked_footage_frames(tmp_path, mo
 
     monkeypatch.setattr(review, "_ask", down)
     assert review.backdrop(pic, "GTA 6", cfg) is False  # never shown unchecked
+
+
+def test_magpie_is_given_numerals_and_dates_it_reads_right():
+    from autoclipper import narrate
+
+    said = narrate.spoken("Grand Theft Auto VI launched on November 19, 2026, after GTA V.")
+    assert said == "Grand Theft Auto Six launched on November 19 2026, after GTA Five."
+    assert narrate.spoken("I saw 4,711 employees. V is a letter.") == (
+        "I saw 4,711 employees. V is a letter."
+    )
