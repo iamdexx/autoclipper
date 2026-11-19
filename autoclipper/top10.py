@@ -163,7 +163,8 @@ def _slug(s: str) -> str:
 
 @functools.lru_cache(maxsize=8)
 def _article(topic: str) -> tuple[verify.Evidence, ...]:
-    return tuple(verify.wiki_extract(topic, chars=24000))
+    # capped once, here: the writer and the fact-check judge are shown the same paragraphs
+    return tuple(verify.wiki_extract(topic, chars=24000)[:60])
 
 
 def article_for(topic: str) -> list[verify.Evidence]:

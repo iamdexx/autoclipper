@@ -229,7 +229,7 @@ def check_claims(
             c.evidence = [*shared, *c.evidence]
         items = (
             "EVIDENCE FOR EVERY CLAIM (counts the same as the evidence under a claim):\n"
-            + "\n".join(f"  [{e.kind}] {e.title[:1200]} ({e.source})" for e in shared[:60])
+            + "\n".join(f"  [{e.kind}] {e.title[:1200]} ({e.source})" for e in shared)
             + "\n\n"
             + items
         )
