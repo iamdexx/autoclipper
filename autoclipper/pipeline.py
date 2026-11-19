@@ -264,6 +264,9 @@ def run_trends(cfg: Config, state: State, do_publish: bool = True) -> int:
             clips = process_video(
                 src.url, creator, cfg, state, do_publish=do_publish, pillar=tp.pillar or None
             )
+            if not state.seen(src.id):  # put back for a later run (a model was unavailable)
+                state.forget_topic("trend", tp.name)
+                continue
             state.mark_topic("trend", tp.name, status="done", video=src.id, clips=len(clips))
             n += 1
         except Exception as e:

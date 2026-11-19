@@ -1756,3 +1756,36 @@ def test_explainer_photo_must_fit_its_line(tmp_path, monkeypatch):
 
     monkeypatch.setattr(review, "_ask", down)
     assert review.photo(pic, "The mask falls.", "Majora", cfg) is True  # an outage does not block
+
+
+def test_trend_topic_whose_source_could_not_be_checked_is_picked_again(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from autoclipper import analytics, pipeline, trends
+    from autoclipper.state import State
+
+    cfg = _cfg(tmp_path)
+    state = State(tmp_path / "state.json")
+    topic = trends.Topic("GTA 6 weather", "test", query="gta 6 weather")
+    src = SimpleNamespace(id="vid1", url="https://y/vid1", title="t", channel="Chan")
+    monkeypatch.setattr(trends, "discover", lambda cfg: [topic])
+    monkeypatch.setattr(trends, "pick_topics", lambda found, cfg, used, **k: found)
+    monkeypatch.setattr(trends, "pick_source", lambda tp, cfg: src)
+    monkeypatch.setattr(analytics, "summary", lambda state: "")
+
+    def unchecked(url, creator, cfg, state, **k):  # process_video when a model is unavailable
+        state.mark_video("vid1", "downloading")
+        state.forget_video("vid1")
+        return []
+
+    monkeypatch.setattr(pipeline, "process_video", unchecked)
+    assert pipeline.run_trends(cfg, state) == 0
+    assert state.used_topics("trend") == []
+
+    def checked(url, creator, cfg, state, **k):
+        state.mark_video("vid1", "skipped_source")
+        return []
+
+    monkeypatch.setattr(pipeline, "process_video", checked)
+    assert pipeline.run_trends(cfg, state) == 1
+    assert state.used_topics("trend") == ["GTA 6 weather"]
