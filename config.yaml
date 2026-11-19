@@ -37,7 +37,7 @@ captions:
   words_per_line: 3 # highlight style only
 
 look:
-  reframe: crop      # the picture fills the 9:16 frame, cropped to the speaker's face (blur = letterboxed over a blurred copy)
+  reframe: crop      # the picture fills the 9:16 frame, cropped to the speaker's face; with no face found, or with blur, the whole picture over a blurred copy
   watermark: "@Clipverse-HQ"   # small handle in the top corner of every video
 
 publishing:

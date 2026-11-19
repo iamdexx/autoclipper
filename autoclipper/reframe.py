@@ -65,15 +65,15 @@ def face_share(source: Path, dur: float, samples: int = 40) -> float | None:
 
 def focus_x(source: Path, start: float, dur: float) -> float | None:
     """Horizontal centre (0..1) of the face the clip should stay on, or None when no face is
-    seen often enough (wide shots, gameplay) - callers then crop the middle."""
+    seen often enough (wide shots, gameplay, a speaker in profile)."""
     n = max(1, min(SAMPLES, int(dur)))
     found = _faces(source, start, dur, n)
     if found is None:
-        log.info("reframe: opencv not installed, cropping the centre")
+        log.info("reframe: opencv not installed, no face to crop to")
         return None
     xs = found[0]
     if len(xs) < max(1, round(n * MIN_HITS)):
-        log.info("reframe: face in %d/%d frames, cropping the centre", len(xs), n)
+        log.info("reframe: face in %d/%d frames, no face to crop to", len(xs), n)
         return None
     cx = median(xs)
     log.info("reframe: face at x=%.2f (%d/%d frames)", cx, len(xs), n)

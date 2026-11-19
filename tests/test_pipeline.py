@@ -2114,3 +2114,14 @@ def test_a_moment_opens_and_closes_on_whole_sentences(tmp_path):
     assert rank._on_sentences(0, 7, quoted, cfg) == (0, 7)  # a closing curly quote ends one too
     trailing = [seg(0, "we have a bunch of aircraft so we have a...")]
     assert rank._on_sentences(0, 10, trailing, cfg) is None  # breaking off is not an ending
+
+
+def test_a_clip_with_no_face_to_crop_to_shows_the_whole_picture(tmp_path, monkeypatch):
+    from autoclipper import reframe
+
+    cfg = _cfg(tmp_path)
+    cfg.look.reframe = "crop"
+    monkeypatch.setattr(reframe, "focus_x", lambda *a: None)  # a speaker in profile, gameplay
+    assert render._frame(cfg, tmp_path / "v.mp4", 0.0, 6.0) == {"mode": "blur", "focus": None}
+    monkeypatch.setattr(reframe, "focus_x", lambda *a: 0.8)
+    assert render._frame(cfg, tmp_path / "v.mp4", 0.0, 6.0) == {"mode": "crop", "focus": 0.8}

@@ -211,9 +211,13 @@ def _vf(
 
 def _frame(cfg: Config, source: Path, start: float, dur: float) -> dict:
     """_vf keyword arguments for this clip: the configured mode and, when cropping, where the
-    speaker is in the footage."""
+    speaker is in the footage. A crop with no speaker found becomes "blur"."""
     mode = cfg.look.reframe
     focus = reframe.focus_x(source, start, dur) if mode == "crop" else None
+    if mode == "crop" and focus is None:
+        # nobody found to crop to (a speaker in profile, gameplay): the middle of the frame may
+        # cut them off, so the whole picture is shown over a blurred copy instead
+        mode = "blur"
     return {"mode": mode, "focus": focus}
 
 
