@@ -2084,3 +2084,21 @@ def test_letterbox_bars_are_cut_off_a_shot(tmp_path):
     cfg = _cfg(tmp_path)
     seg = render.render_shot(barred, 1.0, 2.0, None, [], cfg, tmp_path / "seg.mp4", bars=bars)
     assert abs(narrate.duration(seg) - 2.0) < 0.2
+
+
+def test_a_moment_opens_and_closes_on_whole_sentences(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.clips.min_len_s, cfg.clips.max_len_s = 4, 10
+
+    def seg(start, text):
+        toks = text.split()
+        words = [Word(start + k, start + k + 1, t) for k, t in enumerate(toks)]
+        return Segment(start, start + len(toks), text, words)
+
+    # whisper breaks segments mid-sentence; the full stops are at 3s, 9s and 16s
+    segs = [seg(0, "that was it."), seg(3, "so here we go and"), seg(7, "it works. now we have a")]
+    segs.append(seg(13, "plane right here. and"))
+    assert rank._on_sentences(3, 13, segs, cfg) == (3, 9)  # 13s is mid-sentence, 16s too long
+    assert rank._on_sentences(4, 8, segs, cfg) == (3, 9)  # opens on the sentence's first word
+    cfg.clips.max_len_s = 5
+    assert rank._on_sentences(3, 8, segs, cfg) is None  # nothing closes within 5s: no clip

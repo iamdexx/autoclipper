@@ -379,6 +379,27 @@ def _snap(t: float, segments: list[Segment], to_end: bool) -> float:
     return best if bd <= 4 else t
 
 
+def _on_sentences(
+    start: float, end: float, segments: list[Segment], cfg: Config
+) -> tuple[float, float] | None:
+    """`start`..`end` moved onto whole sentences by the words' own punctuation: it opens on the
+    first word of a sentence and closes on the last word of one, within the allowed length.
+    None when no sentence ends in reach: a clip that stops mid-sentence is not worth making."""
+    words = [w for s in segments for w in s.words]
+    if not words:  # no word timings: the segment boundaries are all there is
+        return start, min(end, start + cfg.clips.max_len_s)
+    last = [i for i, w in enumerate(words) if _SENTENCE_END.search(w.text.strip())]
+    opens = [words[0].start] + [words[i + 1].start for i in last if i + 1 < len(words)]
+    near = min(opens, key=lambda t: abs(t - start))
+    if abs(near - start) <= 6:
+        start = near
+    lo, hi = start + cfg.clips.min_len_s * 0.7, start + cfg.clips.max_len_s
+    closes = [words[i].end for i in last if lo <= words[i].end <= hi]
+    if not closes:
+        return None
+    return start, min(closes, key=lambda t: abs(t - end))
+
+
 def rank_llm(segments: list[Segment], cfg: Config, creator: str, provider: str) -> list[Moment]:
     prompt = PROMPT.format(
         creator=creator,
@@ -403,7 +424,11 @@ def rank_llm(segments: list[Segment], cfg: Config, creator: str, provider: str) 
         dur = end - start
         if dur < cfg.clips.min_len_s * 0.7 or dur > cfg.clips.max_len_s * 1.3:
             continue
-        end = min(end, start + cfg.clips.max_len_s)
+        whole = _on_sentences(start, end, segments, cfg)
+        if whole is None:
+            log.info("moment %.0f-%.0fs dropped: no sentence ends within its length", start, end)
+            continue
+        start, end = whole
         narration = str(it.get("narration", "")).strip()[:240]
         take = str(it.get("take", "")).strip()[:320] if cfg.narration.take else ""
         for what, line in (("narration", narration), ("take", take)):
