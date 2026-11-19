@@ -319,6 +319,9 @@ def test_footage_cache_is_per_entry(tmp_path, monkeypatch):
     cached.write_bytes(b"x")
     monkeypatch.setattr(top10, "has_video", lambda p: True)
     assert top10.fetch_footage(old, 5, tmp_path, cfg) == cached
+    cached.with_suffix(".id").write_text("vid9")  # a kept clip still names its source
+    again = top10.Entry(1, "old play", "l", "q")
+    assert top10.fetch_footage(again, 5, tmp_path, cfg) == cached and again.video_id == "vid9"
     assert top10.fetch_footage(top10.Entry(1, "new play", "l", "q"), 5, tmp_path, cfg) is None
     assert top10.fetch_footage(top10.Entry(1, "old play", "l", "other q"), 5, tmp_path, cfg) is None
 

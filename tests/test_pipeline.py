@@ -1843,3 +1843,72 @@ def test_tool_report_counts_each_models_calls_and_config_sets_the_order(tmp_path
         rank._call_gemini("hi", "g1")
     assert tools.report()["gemini/g1"] == {"ok": 0, "failed": 2, "why": {"other": 1, "timeout": 1}}
     tools.reset()
+
+
+def test_explainer_beats_without_a_photo_get_checked_footage_frames(tmp_path, monkeypatch):
+    from autoclipper import review, top10
+
+    cfg = _cfg(tmp_path)
+    clip = _synthetic(tmp_path, "clip.mp4", 6)
+    asked = {}
+
+    def fetch(entry, secs, dest, cfg, max_s=0, skip=frozenset()):
+        asked.update(query=entry.query, max_s=max_s)
+        asked.setdefault("skips", []).append(skip)
+        entry.video_id = f"v{entry.rank}"
+        return clip
+
+    monkeypatch.setattr(top10, "fetch_footage", fetch)
+    seen = []
+    monkeypatch.setattr(
+        review, "backdrop", lambda p, subject, cfg: seen.append(p) or len(seen) % 2 == 0
+    )
+    s = top10.Script(topic="GTA 6", title="t", intro="", footage="GTA 6 gameplay no commentary")
+    got = top10.footage_stills(s, 2, cfg, tmp_path / "f")
+    assert len(got) == 2 and all(p.exists() for p in got) and len(seen) == 4  # refused: skipped
+    assert asked["query"] == s.footage and asked["max_s"] > cfg.top10.source_max_duration_s
+    # a source with no clean frame is not asked for again: the next one is tried
+    monkeypatch.setattr(review, "backdrop", lambda p, subject, cfg: False)
+    asked["skips"] = []
+    assert top10.footage_stills(s, 1, cfg, tmp_path / "h") == []
+    assert asked["skips"] == [frozenset(), {"v0"}, {"v0", "v1"}]
+    s.footage = ""  # a story about the real world has no footage to fall back on
+    assert top10.footage_stills(s, 2, cfg, tmp_path / "g") == []
+
+    pic = tmp_path / "p.jpg"
+    pic.write_bytes(b"jpg")
+    monkeypatch.undo()
+
+    def down(p, pics, c):
+        raise RuntimeError("503")
+
+    monkeypatch.setattr(review, "_ask", down)
+    assert review.backdrop(pic, "GTA 6", cfg) is False  # never shown unchecked
+
+
+def test_magpie_is_given_numerals_and_dates_it_reads_right():
+    from autoclipper import narrate
+
+    said = narrate.spoken("Grand Theft Auto VI launched on November 19, 2026, after GTA V.")
+    assert said == "Grand Theft Auto Six launched on November 19 2026, after GTA Five."
+    for same in (
+        "I saw 4,711 employees. V is a letter.",
+        "In V Rising you play a vampire.",
+        "the film V for Vendetta",
+    ):
+        assert narrate.spoken(same) == same
+
+
+def test_two_lines_telling_the_same_fact_are_recognised():
+    from autoclipper import top10
+
+    a = "Grand Theft Auto VI launches on November 19, 2026 after two delays."
+    assert top10._same_fact(a, "After two delays the game launches November 19, 2026.")
+    assert not top10._same_fact(a, "Dan Houser left Rockstar in 2020 after two decades.")
+    assert top10._same_fact(
+        "Rockstar grew to 4,711 employees.", "Rockstar's staff grew to 4711 employees."
+    )
+    assert not top10._same_fact(
+        "Trailer 1 drew 93 million views in 24 hours.",
+        "Trailer 2 drew 475 million views in 24 hours.",
+    )

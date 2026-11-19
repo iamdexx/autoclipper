@@ -422,6 +422,19 @@ def nvidia_voice(cfg: Config, out: Path) -> str:
     return name if "." in name else f"Magpie-Multilingual.EN-US.{name}"
 
 
+_ROMAN = {"II": "Two", "III": "Three", "IV": "Four", "V": "Five", "VI": "Six", "VII": "Seven"}
+# after a title word only; a lone "V" before another name ("V Rising", "V for Vendetta") is a letter
+_ROMAN_RE = re.compile(r"\b([A-Z][A-Za-z]{2,} )(II|III|IV|VII|VI|V(?! [A-Z]| for\b))\b")
+_DATE_RE = re.compile(r"\b(\d{1,2}), (?=\d{4}\b)")
+
+
+def spoken(text: str) -> str:
+    """The line as a voice should read it: a title's Roman numeral ("Grand Theft Auto VI") as
+    the number it stands for. Magpie reads the letters, and the words then no longer match."""
+    text = _ROMAN_RE.sub(lambda m: m.group(1) + _ROMAN[m.group(2)], text)
+    return _DATE_RE.sub(r"\1 ", text)  # "November 19, 2026": the comma makes Magpie add a word
+
+
 def tts_nvidia(text: str, voice: str, out: Path) -> Path:
     r = None
     for attempt in range(3):
@@ -429,7 +442,7 @@ def tts_nvidia(text: str, voice: str, out: Path) -> Path:
             f"{NVIDIA_TTS_URL}/v1/audio/synthesize",
             headers={"Authorization": f"Bearer {os.getenv('NVIDIA_API_KEY')}"},
             files={
-                "text": (None, text),
+                "text": (None, spoken(text)),
                 "language": (None, "en-US"),
                 "voice": (None, voice),
                 "encoding": (None, "LINEAR_PCM"),

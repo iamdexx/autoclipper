@@ -39,6 +39,7 @@ class Script:
     hashtags: list[str] = field(default_factory=list)
     entries: list[Entry] = field(default_factory=list)
     tease: str = ""  # ranking style: small line under the title, e.g. "the last one is insane"
+    footage: str = ""  # explainer about a game, film or show: a YouTube search for footage of it
 
 
 SCRIPT_PROMPT = """Write a viral "Top {n}" countdown short (TikTok / Reels / Shorts) about: {topic}
@@ -128,6 +129,8 @@ Narration is plain spoken words only: no emojis, hashtags, stage directions or n
 Return ONLY JSON:
 {{"title": "<the question or claim, max 9 words, Title Case>",
   "intro": "<the puzzle in one sentence, max 18 words>",
+  "footage": "<only when the story is about ONE video game, film or show: its name plus
+              'gameplay no commentary' or 'official trailer'. Otherwise an empty string>",
   "hashtags": ["#a", "#b", "#c", "#d"],
   "entries": [{{"rank": {n}, "name": "<beat label, max 4 words>",
                 "line": "<1-2 sentences, 14-26 words, one concrete fact>",
@@ -247,6 +250,7 @@ def write_script(topic: str, angle: str, cfg: Config, avoid: list[str] | None = 
         hashtags=[str(h) for h in j.get("hashtags", [])][:6],
         entries=entries[: cfg.top10.items],
         tease=str(j.get("tease", ""))[:60],
+        footage=str(j.get("footage") or "")[:80] if story else "",
     )
 
 
@@ -290,6 +294,7 @@ def verified_script(topic: str, angle: str, cfg: Config, vdir: Path) -> Script:
     verify.max_rounds), re-rank 10..1. Raises if fewer than verify.min_entries survive."""
     v = cfg.verify
     strict = v.strict or v.strict_top10
+    story = cfg.top10.style == "explainer"
     script = first = write_script(topic, angle, cfg)
     if not v.enabled:
         return script
@@ -307,7 +312,9 @@ def verified_script(topic: str, angle: str, cfg: Config, vdir: Path) -> Script:
             if k in seen:
                 continue
             seen.add(k)
-            if verify.passes(c, cfg, strict=strict):
+            if story and any(_same_fact(e.line, o.line) for o in fresh + keep):
+                log.info("beat %r says what an earlier beat says; dropping it", e.name)
+            elif verify.passes(c, cfg, strict=strict):
                 fresh.append(e)
             else:
                 rejected.append(e.name)
@@ -315,6 +322,8 @@ def verified_script(topic: str, angle: str, cfg: Config, vdir: Path) -> Script:
         (vdir / "factcheck.json").write_text(json.dumps(report, indent=2))
         if len(keep) >= cfg.top10.items or rnd == v.max_rounds - 1:
             break
+        if story and len(keep) >= v.min_entries:
+            break  # a story is told in order: beats from a second draft would land out of place
         log.info("round %d: %d/%d entries verified; rewriting", rnd + 1, len(keep), cfg.top10.items)
         script = write_script(topic, angle, cfg, avoid=rejected + [e.name for e in keep])
     if len(keep) < v.min_entries:
@@ -335,6 +344,17 @@ _STOP = set(
 
 def _keywords(s: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9]+", s.lower()) if len(w) > 2 and w not in _STOP}
+
+
+def _same_fact(a: str, b: str) -> bool:
+    """Two narration lines that tell the viewer the same thing: most of the shorter one's words
+    are in the other, and neither carries a figure the other contradicts ("Trailer 1 drew 93
+    million views" and "Trailer 2 drew 475 million views" are two facts)."""
+    m, n = (set(re.findall(r"\d[\d.]*\d|\d", s.replace(",", ""))) for s in (a, b))
+    if m and n and not (m <= n or n <= m):
+        return False
+    x, y = _keywords(a), _keywords(b)
+    return bool(x and y) and len(x & y) >= 0.6 * min(len(x), len(y))
 
 
 def footage_matches(entry: Entry, title: str) -> bool:
@@ -362,19 +382,30 @@ def has_video(path: Path) -> bool:
     return "video" in out
 
 
-def fetch_footage(entry: Entry, secs: float, dest: Path, cfg: Config) -> Path | None:
-    """Download only a `secs`-long window from the best-matching video (yt-dlp sections)."""
+def fetch_footage(
+    entry: Entry,
+    secs: float,
+    dest: Path,
+    cfg: Config,
+    max_s: float = 0,
+    skip: frozenset[str] = frozenset(),
+) -> Path | None:
+    """Download only a `secs`-long window from the best-matching video (yt-dlp sections).
+    `max_s`: the longest video to take it from (default: top10.source_max_duration_s).
+    `skip`: ids of videos not to take it from."""
     key = hashlib.sha1(f"{entry.name}|{entry.query}".encode()).hexdigest()[:8]
     out = dest / f"{entry.rank:02d}-{_slug(entry.name)[:30]}-{key}.mp4"
+    source = out.with_suffix(".id")  # which video a kept clip came from
     if out.exists():
         if has_video(out):
+            entry.video_id = entry.video_id or (source.read_text() if source.exists() else "")
             return out
         out.unlink()
     try:
         cands = [
             c
             for c in trends.yt_search(entry.query, 8)
-            if 20 <= c.duration <= cfg.top10.source_max_duration_s
+            if 20 <= c.duration <= (max_s or cfg.top10.source_max_duration_s)
         ]
     except Exception as e:
         log.warning("footage search failed for %r: %s", entry.query, e)
@@ -382,7 +413,9 @@ def fetch_footage(entry: Entry, secs: float, dest: Path, cfg: Config) -> Path | 
     cands = [
         c
         for c in cands
-        if footage_matches(entry, c.title) and trends.rights_ok(c.title, c.channel, cfg)
+        if c.id not in skip
+        and footage_matches(entry, c.title)
+        and trends.rights_ok(c.title, c.channel, cfg)
     ]
     cands.sort(key=lambda c: -c.views)
     for c in cands[:3]:
@@ -404,11 +437,48 @@ def fetch_footage(entry: Entry, secs: float, dest: Path, cfg: Config) -> Path | 
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         if r.returncode == 0 and out.exists() and has_video(out):
             entry.video_id = c.id
+            source.write_text(c.id)
             return out
         log.warning("download failed for %s: %s", c.id, r.stderr[-200:])
         for leftover in dest.glob(out.stem + "*"):
             leftover.unlink()
     return None
+
+
+def footage_stills(script: Script, n: int, cfg: Config, dest: Path) -> list[Path]:
+    """Up to `n` clean frames of the game, film or show a story is about, for the beats no
+    photograph fits: a photo library has nothing for a game. Each frame is checked first."""
+    if n <= 0 or not script.footage:
+        return []
+    dest.mkdir(parents=True, exist_ok=True)
+    out: list[Path] = []
+    tried: set[str] = set()
+    for k in range(3):  # one upload may carry its channel's watermark throughout: try others
+        if len(out) >= n:
+            break
+        # clean footage of a game is mostly hours-long walkthroughs; only a window is downloaded
+        src = Entry(k, "", "", script.footage)
+        clip = fetch_footage(src, 120, dest, cfg, max_s=12 * 3600, skip=frozenset(tried))
+        if clip is None:
+            log.warning("no more footage found for %r", script.footage)
+            break
+        tried.add(src.video_id)
+        dur = narrate.duration(clip)
+        looks = (n - len(out)) * 3
+        for i in range(looks):
+            if len(out) == n:
+                break
+            f = dest / f"still-{k}-{i:02d}.jpg"
+            subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{dur * (i + 0.5) / looks:.3f}"]
+                + ["-i", str(clip), "-frames:v", "1", "-q:v", "2"]
+                # a game's own subtitles and button prompts sit at the bottom of the frame
+                + ["-vf", "crop=iw:ih*0.78:0:0", str(f)],
+                check=False,
+            )
+            if f.exists() and review.backdrop(f, script.footage, cfg):
+                out.append(f)
+    return out
 
 
 def _renumber(script: Script, cfg: Config, kept: int) -> None:
@@ -462,10 +532,15 @@ def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
             accept=fits,
             beat=e.line if fits else "",
         )
-        if p is None:
-            log.warning("no image for #%d %s; dropping it", e.rank, e.name)
-        else:
+        if p is not None:
             pics[id(e)] = p
+    bare = [e for e in script.entries if id(e) not in pics]
+    if story and bare and cfg.review.enabled:
+        stills = footage_stills(script, len(bare), cfg, vdir / "footage")
+        pics.update({id(e): s for e, s in zip(bare, stills, strict=False)})
+    for e in script.entries:
+        if id(e) not in pics:
+            log.warning("no image for #%d %s; dropping it", e.rank, e.name)
     script.entries = [e for e in script.entries if id(e) in pics]
     if len(script.entries) < max(3, cfg.verify.min_entries if cfg.verify.enabled else 3):
         raise RuntimeError(f"only {len(script.entries)} entries with images for {script.title!r}")
