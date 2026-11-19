@@ -220,6 +220,8 @@ def test_clip_tail_rolls_on_but_never_into_the_next_sentence(tmp_path):
     words = [Word(0.0, 3.0, "done."), Word(3.2, 6.0, "next")]
     inside = [Segment(0.0, 6.0, "done. next", words), Segment(9.0, 12.0, "later", [])]
     assert render.clip_tail(Moment(0.0, 3.0, "h", "r", 1.0), inside, 30.0, cfg) == render.MIN_TAIL
+    # a segment without word timings still counts by its own start
+    assert render.clip_tail(Moment(0.0, 8.4, "h", "r", 1.0), inside, 30.0, cfg) == 0.6
     assert render.clip_tail(Moment(0.0, 8.0, "h", "r", 1.0), segs, 8.0, cfg) == 0.0
     out = render.render_clip(_src(tmp_path), m, segs, cfg, tmp_path / "clip.mp4")
     assert abs(narrate.duration(out) - 6.3) < 0.2
