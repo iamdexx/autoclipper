@@ -294,6 +294,7 @@ def verified_script(topic: str, angle: str, cfg: Config, vdir: Path) -> Script:
     verify.max_rounds), re-rank 10..1. Raises if fewer than verify.min_entries survive."""
     v = cfg.verify
     strict = v.strict or v.strict_top10
+    story = cfg.top10.style == "explainer"
     script = first = write_script(topic, angle, cfg)
     if not v.enabled:
         return script
@@ -311,7 +312,9 @@ def verified_script(topic: str, angle: str, cfg: Config, vdir: Path) -> Script:
             if k in seen:
                 continue
             seen.add(k)
-            if verify.passes(c, cfg, strict=strict):
+            if story and any(_same_fact(e.line, o.line) for o in fresh + keep):
+                log.info("beat %r says what an earlier beat says; dropping it", e.name)
+            elif verify.passes(c, cfg, strict=strict):
                 fresh.append(e)
             else:
                 rejected.append(e.name)
@@ -319,6 +322,8 @@ def verified_script(topic: str, angle: str, cfg: Config, vdir: Path) -> Script:
         (vdir / "factcheck.json").write_text(json.dumps(report, indent=2))
         if len(keep) >= cfg.top10.items or rnd == v.max_rounds - 1:
             break
+        if story and len(keep) >= v.min_entries:
+            break  # a story is told in order: beats from a second draft would land out of place
         log.info("round %d: %d/%d entries verified; rewriting", rnd + 1, len(keep), cfg.top10.items)
         script = write_script(topic, angle, cfg, avoid=rejected + [e.name for e in keep])
     if len(keep) < v.min_entries:
@@ -339,6 +344,13 @@ _STOP = set(
 
 def _keywords(s: str) -> set[str]:
     return {w for w in re.findall(r"[a-z0-9]+", s.lower()) if len(w) > 2 and w not in _STOP}
+
+
+def _same_fact(a: str, b: str) -> bool:
+    """Two narration lines that tell the viewer the same thing (most of the shorter one's words
+    are in the other)."""
+    x, y = _keywords(a), _keywords(b)
+    return bool(x and y) and len(x & y) >= 0.6 * min(len(x), len(y))
 
 
 def footage_matches(entry: Entry, title: str) -> bool:
