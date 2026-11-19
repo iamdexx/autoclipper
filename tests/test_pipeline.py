@@ -206,7 +206,8 @@ def test_render_mixes_narration(tmp_path, monkeypatch):
 
 def test_clip_tail_rolls_on_but_never_into_the_next_sentence(tmp_path):
     cfg = _cfg(tmp_path)
-    segs = _segments(4)  # sentences at 0-2, 2-4, 4-6, 6-8
+    # sentences at 0-2, 2-4, 4-6, 6-8, here without word timings
+    segs = [Segment(s.start, s.end, s.text, []) for s in _segments(4)]
     # a moment that ends between sentences gets the full tail
     m = Moment(0.0, 6.0, "h", "r", 1.0)
     assert render.clip_tail(Moment(0.0, 4.6, "h", "r", 1.0), segs, 30.0, cfg) == 1.0
@@ -215,6 +216,10 @@ def test_clip_tail_rolls_on_but_never_into_the_next_sentence(tmp_path):
     assert render.clip_tail(m, segs, 30.0, cfg) == 0.3
     # and never runs past the end of the source
     assert render.clip_tail(Moment(0.0, 8.0, "h", "r", 1.0), segs, 8.4, cfg) == 0.4
+    # a moment that ends inside a segment stops before that segment's next word
+    words = [Word(0.0, 3.0, "done."), Word(3.2, 6.0, "next")]
+    inside = [Segment(0.0, 6.0, "done. next", words), Segment(9.0, 12.0, "later", [])]
+    assert render.clip_tail(Moment(0.0, 3.0, "h", "r", 1.0), inside, 30.0, cfg) == render.MIN_TAIL
     assert render.clip_tail(Moment(0.0, 8.0, "h", "r", 1.0), segs, 8.0, cfg) == 0.0
     out = render.render_clip(_src(tmp_path), m, segs, cfg, tmp_path / "clip.mp4")
     assert abs(narrate.duration(out) - 6.3) < 0.2

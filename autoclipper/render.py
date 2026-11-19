@@ -501,7 +501,9 @@ def clip_tail(moment: Moment, segments: list[Segment], source_len: float, cfg: C
     """How long the footage rolls on after the moment's last line: up to clips.tail_s, but never
     into the next sentence (so the fade-out doesn't catch half a word) or past the source."""
     tail = min(cfg.clips.tail_s, max(0.0, source_len - moment.end))
-    nxt = [s.start for s in segments if s.start >= moment.end - 0.01]
+    # by words where there are any: a moment may end inside a segment
+    starts = [w.start for s in segments for w in s.words] or [s.start for s in segments]
+    nxt = [t for t in starts if t >= moment.end - 0.01]
     if nxt:
         tail = min(tail, max(MIN_TAIL, min(nxt) - moment.end))
     return round(max(0.0, tail), 3)
