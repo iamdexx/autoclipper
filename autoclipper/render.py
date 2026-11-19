@@ -407,6 +407,7 @@ def render_still(
 
 # a game's own subtitles and button prompts sit in the bottom of its frame
 SHOT_CROP = "crop=iw:ih*0.78:0:0"
+SHOT_ASPECT = 0.8  # width over height of the part of the footage that is shown (9:16 is 0.5625)
 
 
 def render_shot(
@@ -428,8 +429,12 @@ def render_shot(
     ass_path = out.with_suffix(".ass")
     ass_path.write_text(build_ass(words, title, dur, cfg, badge=""))
     vf = (
-        f"[0:v]{SHOT_CROP},scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,"
-        f"crop={W}:{H},fps={FPS},setsar=1,tpad=stop_mode=clone:stop_duration={dur:.3f},"
+        # the middle 4:5 of the picture across the full width, over a blurred copy of itself:
+        # filling the tall screen with the picture alone cut a third-person character off
+        f"[0:v]{SHOT_CROP},fps={FPS},split=2[b0][f0];"
+        f"[b0]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=24:6[bg];"
+        f"[f0]crop='min(iw,ih*{SHOT_ASPECT})':ih,scale={W}:-2:flags=lanczos[fg];"
+        f"[bg][fg]overlay=0:(H-h)/2,setsar=1,tpad=stop_mode=clone:stop_duration={dur:.3f},"
         f"ass={ass_path.as_posix()}[v]"
     )
     shown = dur if footage_s is None else max(0.1, min(dur, footage_s))
