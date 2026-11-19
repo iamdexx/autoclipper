@@ -428,6 +428,7 @@ def footage_stills(script: Script, n: int, cfg: Config, dest: Path) -> list[Path
     if clip is None:
         log.warning("no footage found for %r", script.footage)
         return []
+    dest.mkdir(parents=True, exist_ok=True)
     dur = narrate.duration(clip)
     out: list[Path] = []
     looks = n * 3
