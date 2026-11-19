@@ -347,8 +347,12 @@ def _keywords(s: str) -> set[str]:
 
 
 def _same_fact(a: str, b: str) -> bool:
-    """Two narration lines that tell the viewer the same thing (most of the shorter one's words
-    are in the other)."""
+    """Two narration lines that tell the viewer the same thing: most of the shorter one's words
+    are in the other, and neither carries a figure the other contradicts ("Trailer 1 drew 93
+    million views" and "Trailer 2 drew 475 million views" are two facts)."""
+    m, n = (set(re.findall(r"\d[\d,.]*\d|\d", s)) for s in (a, b))
+    if m and n and not (m <= n or n <= m):
+        return False
     x, y = _keywords(a), _keywords(b)
     return bool(x and y) and len(x & y) >= 0.6 * min(len(x), len(y))
 
@@ -391,8 +395,10 @@ def fetch_footage(
     `skip`: ids of videos not to take it from."""
     key = hashlib.sha1(f"{entry.name}|{entry.query}".encode()).hexdigest()[:8]
     out = dest / f"{entry.rank:02d}-{_slug(entry.name)[:30]}-{key}.mp4"
+    source = out.with_suffix(".id")  # which video a kept clip came from
     if out.exists():
         if has_video(out):
+            entry.video_id = entry.video_id or (source.read_text() if source.exists() else "")
             return out
         out.unlink()
     try:
@@ -431,6 +437,7 @@ def fetch_footage(
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         if r.returncode == 0 and out.exists() and has_video(out):
             entry.video_id = c.id
+            source.write_text(c.id)
             return out
         log.warning("download failed for %s: %s", c.id, r.stderr[-200:])
         for leftover in dest.glob(out.stem + "*"):

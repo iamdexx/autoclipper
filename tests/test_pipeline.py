@@ -1891,9 +1891,12 @@ def test_magpie_is_given_numerals_and_dates_it_reads_right():
 
     said = narrate.spoken("Grand Theft Auto VI launched on November 19, 2026, after GTA V.")
     assert said == "Grand Theft Auto Six launched on November 19 2026, after GTA Five."
-    assert narrate.spoken("I saw 4,711 employees. V is a letter.") == (
-        "I saw 4,711 employees. V is a letter."
-    )
+    for same in (
+        "I saw 4,711 employees. V is a letter.",
+        "In V Rising you play a vampire.",
+        "the film V for Vendetta",
+    ):
+        assert narrate.spoken(same) == same
 
 
 def test_two_lines_telling_the_same_fact_are_recognised():
@@ -1902,3 +1905,7 @@ def test_two_lines_telling_the_same_fact_are_recognised():
     a = "Grand Theft Auto VI launches on November 19, 2026 after two delays."
     assert top10._same_fact(a, "After two delays the game launches November 19, 2026.")
     assert not top10._same_fact(a, "Dan Houser left Rockstar in 2020 after two decades.")
+    assert not top10._same_fact(
+        "Trailer 1 drew 93 million views in 24 hours.",
+        "Trailer 2 drew 475 million views in 24 hours.",
+    )
