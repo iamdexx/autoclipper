@@ -86,7 +86,11 @@ _FORMATS = {
     "add one line after it; everything in between is the original speaker.",
     "top10": "FORMAT: our own scripted story, narrated start to finish by our host over photos "
     "or footage. It must open with a question or claim worth staying for, give a new specific "
-    "fact in every beat, and end on a payoff.",
+    "fact in every beat, and end on a payoff. When the story is about a game, a film or a "
+    "show, scenes from it are the right pictures for every beat: wrong_pictures is for a "
+    "picture of something else. The captions are the script itself; what is said below was "
+    "transcribed by a machine that mishears a word now and then, so a word that differs "
+    "between a caption and the transcript is not inconsistent_wording.",
 }
 
 
@@ -165,7 +169,8 @@ BACKDROP_PROMPT = """This frame will fill the screen of a short video, behind a 
 story about: {subject}
 Is it a clean picture of that subject (for a game: the game itself being played or one of its
 scenes)? A frame with a person in a webcam box, a channel's logo, name or @handle, captions or
-other added text, subtitles or button prompts, a menu, a loading or title screen, a screenshot
+other added text, subtitles or button prompts, black bars above and below the picture, a menu,
+a loading or title screen, a screenshot
 of a post or an article, or a frame of something else is a "no".
 Return JSON only: {{"shows": "<what the frame shows, a few words>", "fits": true|false}}"""
 
