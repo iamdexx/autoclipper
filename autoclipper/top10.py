@@ -542,19 +542,17 @@ def _finish(parts: list[Path], title: str, cfg: Config, vdir: Path) -> Path:
     return out
 
 
-def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
-    """Listicle style: one photo per item with a slow zoom, one word on screen at a time, the
-    narrator reads straight through with no gaps, no badges/SFX/clip audio - just voice + bed.
-    Explainer style is the same build with the story's title over the opening, photos from
-    Wikimedia Commons only (never another channel's thumbnail) and the push direction
-    alternating beat to beat."""
-    t = cfg.top10
-    story = t.style == "explainer"
-    vdir.mkdir(parents=True, exist_ok=True)
-    (vdir / "script.json").write_text(json.dumps(asdict(script), indent=2))
-
+def _pictures(script: Script, cfg: Config, vdir: Path, story: bool) -> dict[int, Path]:
+    """The picture each entry is shown over, keyed by id(entry); an entry with none is absent."""
     pics: dict[int, Path] = {}
+    if story and script.footage and cfg.review.enabled:
+        # a story about a game is shown over the game: the photo library answers a line about
+        # its revenue with a dollar bill, and the finished video failed for wrong pictures
+        stills = footage_stills(script, len(script.entries), cfg, vdir / "footage")
+        pics.update({id(e): s for e, s in zip(script.entries, stills, strict=False)})
     for e in script.entries:
+        if id(e) in pics:
+            continue
         fits = None
         if story and cfg.review.enabled:  # each photo has to show what its line says
             fits = functools.partial(review.photo, line=e.line, name=e.name, cfg=cfg)
@@ -568,10 +566,21 @@ def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
         )
         if p is not None:
             pics[id(e)] = p
-    bare = [e for e in script.entries if id(e) not in pics]
-    if story and bare and cfg.review.enabled:
-        stills = footage_stills(script, len(bare), cfg, vdir / "footage")
-        pics.update({id(e): s for e, s in zip(bare, stills, strict=False)})
+    return pics
+
+
+def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
+    """Listicle style: one photo per item with a slow zoom, one word on screen at a time, the
+    narrator reads straight through with no gaps, no badges/SFX/clip audio - just voice + bed.
+    Explainer style is the same build with the story's title over the opening, photos from
+    Wikimedia Commons only (never another channel's thumbnail) and the push direction
+    alternating beat to beat."""
+    t = cfg.top10
+    story = t.style == "explainer"
+    vdir.mkdir(parents=True, exist_ok=True)
+    (vdir / "script.json").write_text(json.dumps(asdict(script), indent=2))
+
+    pics = _pictures(script, cfg, vdir, story)
     for e in script.entries:
         if id(e) not in pics:
             log.warning("no image for #%d %s; dropping it", e.rank, e.name)

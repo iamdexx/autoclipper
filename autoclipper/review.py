@@ -83,7 +83,11 @@ _FORMATS = {
     "add one line after it; everything in between is the original speaker.",
     "top10": "FORMAT: our own scripted story, narrated start to finish by our host over photos "
     "or footage. It must open with a question or claim worth staying for, give a new specific "
-    "fact in every beat, and end on a payoff.",
+    "fact in every beat, and end on a payoff. When the story is about a game, a film or a "
+    "show, scenes from it are the right pictures for every beat: wrong_pictures is for a "
+    "picture of something else. The captions are the script itself; what is said below was "
+    "transcribed by a machine that mishears a word now and then, so a word that differs "
+    "between a caption and the transcript is not inconsistent_wording.",
 }
 
 
