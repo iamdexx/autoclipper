@@ -219,15 +219,23 @@ def _call_gemini(prompt: str, model: str | None, images: list[bytes] | None = No
     for attempt in range(4):
         for m in models:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
-            r = requests.post(url, headers={"x-goog-api-key": key}, json=body, timeout=180)
+            try:
+                r = requests.post(url, headers={"x-goog-api-key": key}, json=body, timeout=180)
+            except requests.RequestException as e:
+                tools.record(f"gemini/{m}", False, str(e))
+                raise
             if r.status_code in (429, 500, 503):
                 last = RuntimeError(f"gemini {m} {r.status_code}: {r.text[:200]}")
                 log.warning("%s - trying next model", last)
                 tools.record(f"gemini/{m}", False, str(r.status_code))
                 continue
-            tools.record(f"gemini/{m}", r.status_code == 200, str(r.status_code))
-            r.raise_for_status()
-            parts = r.json()["candidates"][0]["content"]["parts"]
+            try:
+                r.raise_for_status()
+                parts = r.json()["candidates"][0]["content"]["parts"]
+            except Exception as e:  # refused, or an answer with nothing in it (blocked)
+                tools.record(f"gemini/{m}", False, str(e))
+                raise
+            tools.record(f"gemini/{m}", True)
             return "".join(p.get("text", "") for p in parts)
         time.sleep(5 * (attempt + 1))
     raise last or RuntimeError("gemini unavailable")

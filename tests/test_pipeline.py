@@ -1817,3 +1817,29 @@ def test_tool_report_counts_each_models_calls_and_config_sets_the_order(tmp_path
     assert rep["b"] == {"ok": 0, "failed": 2, "why": {"429": 2}}
     assert rep["a"] == {"ok": 2, "failed": 0, "why": {}}
     tools.reset()
+
+    # Gemini: a timeout and a blocked answer (200 with no candidates) are failures too
+    import requests
+
+    class G:
+        status_code, text = 200, ""
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"promptFeedback": {"blockReason": "SAFETY"}}
+
+    monkeypatch.setenv("GEMINI_API_KEY", "g")
+    monkeypatch.setattr(requests, "post", lambda *a, **k: G())
+    with pytest.raises(KeyError):
+        rank._call_gemini("hi", "g1")
+
+    def timeout(*a, **k):
+        raise requests.Timeout("Read timed out.")
+
+    monkeypatch.setattr(requests, "post", timeout)
+    with pytest.raises(requests.Timeout):
+        rank._call_gemini("hi", "g1")
+    assert tools.report()["gemini/g1"] == {"ok": 0, "failed": 2, "why": {"other": 1, "timeout": 1}}
+    tools.reset()
