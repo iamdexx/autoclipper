@@ -423,14 +423,15 @@ def nvidia_voice(cfg: Config, out: Path) -> str:
 
 
 _ROMAN = {"II": "Two", "III": "Three", "IV": "Four", "V": "Five", "VI": "Six", "VII": "Seven"}
-_ROMAN_RE = re.compile(r"(?<=[A-Za-z] )(II|III|IV|V|VI|VII)\b")
+# after a title word only; a lone "V" before another name ("V Rising", "V for Vendetta") is a letter
+_ROMAN_RE = re.compile(r"\b([A-Z][A-Za-z]{2,} )(II|III|IV|VII|VI|V(?! [A-Z]| for\b))\b")
 _DATE_RE = re.compile(r"\b(\d{1,2}), (?=\d{4}\b)")
 
 
 def spoken(text: str) -> str:
     """The line as a voice should read it: a title's Roman numeral ("Grand Theft Auto VI") as
     the number it stands for. Magpie reads the letters, and the words then no longer match."""
-    text = _ROMAN_RE.sub(lambda m: _ROMAN[m.group(1)], text)
+    text = _ROMAN_RE.sub(lambda m: m.group(1) + _ROMAN[m.group(2)], text)
     return _DATE_RE.sub(r"\1 ", text)  # "November 19, 2026": the comma makes Magpie add a word
 
 
