@@ -14,7 +14,7 @@ import re
 import time
 from dataclasses import dataclass
 
-from . import slop
+from . import slop, tools
 from .config import Config
 from .ingest import Segment
 
@@ -223,7 +223,9 @@ def _call_gemini(prompt: str, model: str | None, images: list[bytes] | None = No
             if r.status_code in (429, 500, 503):
                 last = RuntimeError(f"gemini {m} {r.status_code}: {r.text[:200]}")
                 log.warning("%s - trying next model", last)
+                tools.record(f"gemini/{m}", False, str(r.status_code))
                 continue
+            tools.record(f"gemini/{m}", r.status_code == 200, str(r.status_code))
             r.raise_for_status()
             parts = r.json()["candidates"][0]["content"]["parts"]
             return "".join(p.get("text", "") for p in parts)
@@ -240,6 +242,13 @@ NVIDIA_VISION_MODELS = [
 ]
 NVIDIA_MIN_GAP_S = 2.0
 _nvidia_last = 0.0
+
+
+def configure(cfg: Config) -> None:
+    """Take the NVIDIA model order from the config, when it names one."""
+    global NVIDIA_MODELS, NVIDIA_VISION_MODELS
+    NVIDIA_MODELS = list(cfg.nvidia_text_models) or NVIDIA_MODELS
+    NVIDIA_VISION_MODELS = list(cfg.nvidia_vision_models) or NVIDIA_VISION_MODELS
 
 
 def _nvidia_post(model: str, content, timeout: float = 240):
@@ -289,12 +298,15 @@ def _call_nvidia(prompt: str, model: str | None, images: list[bytes] | None = No
             except requests.RequestException as e:
                 last = RuntimeError(f"nvidia {m}: {e}")
                 log.warning("%s - trying next model", last)
+                tools.record(m, False, str(e))
                 continue
             if r.status_code != 200:
                 last = RuntimeError(f"nvidia {m} {r.status_code}: {r.text[:200]}")
                 log.warning("%s - trying next model", last)
+                tools.record(m, False, str(r.status_code))
                 continue
             text = r.json()["choices"][0]["message"].get("content") or ""
+            tools.record(m, bool(text.strip()), "empty answer")
             if text.strip():
                 return text
             last = RuntimeError(f"nvidia {m}: empty answer")

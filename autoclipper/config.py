@@ -253,6 +253,9 @@ class Config:
     whisper_compute: str = "int8"
     llm_provider: str = "auto"  # auto | nvidia | gemini | anthropic | openai | heuristic
     llm_model: str | None = None
+    # NVIDIA models in the order they are tried (empty = rank.NVIDIA_MODELS / NVIDIA_VISION_MODELS)
+    nvidia_text_models: list[str] = field(default_factory=list)
+    nvidia_vision_models: list[str] = field(default_factory=list)
     clips: ClipRules = field(default_factory=ClipRules)
     captions: CaptionStyle = field(default_factory=CaptionStyle)
     look: Look = field(default_factory=Look)

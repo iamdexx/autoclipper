@@ -34,6 +34,7 @@ from pathlib import Path
 
 import requests
 
+from . import tools
 from .config import Config
 from .ingest import Word
 
@@ -391,14 +392,19 @@ def synthesize_timed(text: str, cfg: Config, out: Path) -> tuple[Path, list[Word
     for provider in providers(cfg):
         try:
             n = cfg.narration
-            if provider == "elevenlabs":
-                return tts_elevenlabs_timed(text, n.elevenlabs_voice, out)
-            if provider == "edge":
-                return tts_edge_timed(text, n.edge_voice, n.edge_rate, out)
+            if provider in ("elevenlabs", "edge"):
+                if provider == "elevenlabs":
+                    timed = tts_elevenlabs_timed(text, n.elevenlabs_voice, out)
+                else:
+                    timed = tts_edge_timed(text, n.edge_voice, n.edge_rate, out)
+                tools.record(f"voice/{provider}", True)
+                return timed
             voice = _tts(provider, text, cfg, out)
         except Exception as e:
             log.warning("narration with %s failed: %s", provider, e)
+            tools.record(f"voice/{provider}", False, str(e))
             continue
+        tools.record(f"voice/{provider}", True)
         out.with_suffix(".words.json").unlink(missing_ok=True)
         return voice, align_words(text, _heard(voice, cfg), duration(voice))
     return None

@@ -1789,3 +1789,31 @@ def test_trend_topic_whose_source_could_not_be_checked_is_picked_again(tmp_path,
     monkeypatch.setattr(pipeline, "process_video", checked)
     assert pipeline.run_trends(cfg, state) == 1
     assert state.used_topics("trend") == ["GTA 6 weather"]
+
+
+def test_tool_report_counts_each_models_calls_and_config_sets_the_order(tmp_path, monkeypatch):
+    from autoclipper import tools
+
+    class R:
+        def __init__(self, code, text=""):
+            self.status_code, self.text = code, text
+
+        def json(self):
+            return {"choices": [{"message": {"content": "hello"}}]}
+
+    cfg = _cfg(tmp_path)
+    monkeypatch.setattr(rank, "NVIDIA_MODELS", ["a", "b"])
+    cfg.nvidia_text_models = ["b", "a"]  # the managers moved model b to the front
+    rank.configure(cfg)
+    assert rank.NVIDIA_MODELS == ["b", "a"]
+    monkeypatch.setenv("NVIDIA_API_KEY", "n")
+    tools.reset()
+    monkeypatch.setattr(
+        rank, "_nvidia_post", lambda m, c, timeout=240: R(429, "slow") if m == "b" else R(200)
+    )
+    assert rank._call_nvidia("hi", None) == "hello"
+    assert rank._call_nvidia("hi", None) == "hello"
+    rep = tools.report()
+    assert rep["b"] == {"ok": 0, "failed": 2, "why": {"429": 2}}
+    assert rep["a"] == {"ok": 2, "failed": 0, "why": {}}
+    tools.reset()

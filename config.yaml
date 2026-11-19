@@ -16,6 +16,10 @@ creators:
 workdir: data
 whisper_model: base          # tiny/base/small/medium — bigger = better captions, slower
 llm_provider: auto           # auto | nvidia | gemini | anthropic | openai | heuristic
+# NVIDIA models, in the order they are tried. The run's log ends with a "tool report" line per
+# model and voice (calls that worked / failed); reorder these when one keeps failing.
+nvidia_text_models: [nvidia/nemotron-3-ultra-550b-a55b, nvidia/nemotron-3.5-lightning-30b-a3b]
+nvidia_vision_models: [nvidia/nemotron-3.5-super-vl-120b-a12b, nvidia/nemotron-3-nano-omni-30b-a3b-reasoning]
 poll_interval_s: 900
 max_videos_per_run: 2
 
