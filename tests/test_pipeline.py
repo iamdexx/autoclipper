@@ -206,7 +206,8 @@ def test_render_mixes_narration(tmp_path, monkeypatch):
 
 def test_clip_tail_rolls_on_but_never_into_the_next_sentence(tmp_path):
     cfg = _cfg(tmp_path)
-    segs = _segments(4)  # sentences at 0-2, 2-4, 4-6, 6-8
+    # sentences at 0-2, 2-4, 4-6, 6-8, here without word timings
+    segs = [Segment(s.start, s.end, s.text, []) for s in _segments(4)]
     # a moment that ends between sentences gets the full tail
     m = Moment(0.0, 6.0, "h", "r", 1.0)
     assert render.clip_tail(Moment(0.0, 4.6, "h", "r", 1.0), segs, 30.0, cfg) == 1.0
@@ -215,6 +216,12 @@ def test_clip_tail_rolls_on_but_never_into_the_next_sentence(tmp_path):
     assert render.clip_tail(m, segs, 30.0, cfg) == 0.3
     # and never runs past the end of the source
     assert render.clip_tail(Moment(0.0, 8.0, "h", "r", 1.0), segs, 8.4, cfg) == 0.4
+    # a moment that ends inside a segment stops before that segment's next word
+    words = [Word(0.0, 3.0, "done."), Word(3.2, 6.0, "next")]
+    inside = [Segment(0.0, 6.0, "done. next", words), Segment(9.0, 12.0, "later", [])]
+    assert render.clip_tail(Moment(0.0, 3.0, "h", "r", 1.0), inside, 30.0, cfg) == render.MIN_TAIL
+    # a segment without word timings still counts by its own start
+    assert render.clip_tail(Moment(0.0, 8.4, "h", "r", 1.0), inside, 30.0, cfg) == 0.6
     assert render.clip_tail(Moment(0.0, 8.0, "h", "r", 1.0), segs, 8.0, cfg) == 0.0
     out = render.render_clip(_src(tmp_path), m, segs, cfg, tmp_path / "clip.mp4")
     assert abs(narrate.duration(out) - 6.3) < 0.2
@@ -2084,3 +2091,26 @@ def test_letterbox_bars_are_cut_off_a_shot(tmp_path):
     cfg = _cfg(tmp_path)
     seg = render.render_shot(barred, 1.0, 2.0, None, [], cfg, tmp_path / "seg.mp4", bars=bars)
     assert abs(narrate.duration(seg) - 2.0) < 0.2
+
+
+def test_a_moment_opens_and_closes_on_whole_sentences(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.clips.min_len_s, cfg.clips.max_len_s = 4, 10
+
+    def seg(start, text):
+        toks = text.split()
+        words = [Word(start + k, start + k + 1, t) for k, t in enumerate(toks)]
+        return Segment(start, start + len(toks), text, words)
+
+    # whisper breaks segments mid-sentence; the full stops are at 3s, 9s and 16s
+    segs = [seg(0, "that was it."), seg(3, "so here we go and"), seg(7, "it works. now we have a")]
+    segs.append(seg(13, "plane right here. and"))
+    assert rank._on_sentences(3, 13, segs, cfg) == (3, 9)  # 13s is mid-sentence, 16s too long
+    assert rank._on_sentences(4, 8, segs, cfg) == (3, 9)  # opens on the sentence's first word
+    cfg.clips.max_len_s = 5
+    assert rank._on_sentences(3, 8, segs, cfg) is None  # nothing closes within 5s: no clip
+    cfg.clips.max_len_s = 10
+    quoted = [seg(0, "she said “the new map really works.”")]
+    assert rank._on_sentences(0, 7, quoted, cfg) == (0, 7)  # a closing curly quote ends one too
+    trailing = [seg(0, "we have a bunch of aircraft so we have a...")]
+    assert rank._on_sentences(0, 10, trailing, cfg) is None  # breaking off is not an ending
