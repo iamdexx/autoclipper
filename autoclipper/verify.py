@@ -208,9 +208,15 @@ def _fmt(i: int, claim: str, ev: list[Evidence]) -> str:
     return "\n".join(lines)
 
 
-def check_claims(claims: list[tuple[str, str]], cfg: Config, titles: bool = True) -> list[Check]:
+def check_claims(
+    claims: list[tuple[str, str]],
+    cfg: Config,
+    titles: bool = True,
+    shared: list[Evidence] | None = None,
+) -> list[Check]:
     """claims = [(claim_text, search_query)] -> one Check per claim (same order). `titles`: see
-    gather()."""
+    gather(). `shared`: evidence every claim is also judged against (the article a script was
+    written from), listed once ahead of the claims."""
     if not claims:
         return []
     with ThreadPoolExecutor(max_workers=4) as ex:
@@ -218,6 +224,15 @@ def check_claims(claims: list[tuple[str, str]], cfg: Config, titles: bool = True
         evidence = list(ex.map(find, [q for _, q in claims]))
     checks = [Check(claim=c, evidence=ev) for (c, _), ev in zip(claims, evidence, strict=True)]
     items = "\n\n".join(_fmt(i, c.claim, c.evidence) for i, c in enumerate(checks))
+    if shared:
+        for c in checks:
+            c.evidence = [*shared, *c.evidence]
+        items = (
+            "EVIDENCE FOR EVERY CLAIM (counts the same as the evidence under a claim):\n"
+            + "\n".join(f"  [{e.kind}] {e.title[:1200]} ({e.source})" for e in shared)
+            + "\n\n"
+            + items
+        )
     try:
         raw = trends._llm(JUDGE_PROMPT.format(items=items), cfg)
         for it in rank._parse_json_array(raw):

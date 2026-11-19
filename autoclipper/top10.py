@@ -161,6 +161,22 @@ def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:40] or "top10"
 
 
+@functools.lru_cache(maxsize=8)
+def _article(topic: str) -> tuple[verify.Evidence, ...]:
+    # capped once, here: the writer and the fact-check judge are shown the same paragraphs
+    return tuple(verify.wiki_extract(topic, chars=24000)[:60])
+
+
+def article_for(topic: str) -> list[verify.Evidence]:
+    """The Wikipedia article an explainer is written from and checked against ([] when the
+    lookup fails): a search by each line's wording rarely finds the paragraph that backs it."""
+    try:
+        return list(_article(topic))
+    except Exception as e:
+        log.warning("no article for %r: %s", topic, e)
+        return []
+
+
 def sources_for(topic: str, angle: str, n: int, titles: bool = True) -> str:
     """Evidence block for the script prompt: the same keyless retrieval the fact-check judges
     against (news, wiki, and YouTube titles unless `titles` is off), so the writer picks moments
@@ -173,6 +189,8 @@ def sources_for(topic: str, angle: str, n: int, titles: bool = True) -> str:
         ev = verify.gather(topic, titles=False)
         if angle and angle.lower() not in topic.lower():
             ev += verify.gather(angle[:120], titles=False)
+    if not titles:  # the article first and in full: every beat has to come out of it
+        ev = [*article_for(topic), *ev]
     seen: set[str] = set()
     items = []
     for e in ev:
@@ -181,11 +199,11 @@ def sources_for(topic: str, angle: str, n: int, titles: bool = True) -> str:
             continue
         seen.add(k)
         meta = " | ".join(x for x in (e.source, e.date) if x)
-        cap = 700 if e.kind == "article" else 160
+        cap = (700 if titles else 1200) if e.kind == "article" else 160
         items.append(f"- [{e.kind}] {e.title[:cap]}" + (f" ({meta})" if meta else ""))
     if not items:
         return ""
-    return SOURCES_NOTE.format(n=n, items="\n".join(items[:40]))
+    return SOURCES_NOTE.format(n=n, items="\n".join(items[: 40 if titles else 70]))
 
 
 def write_script(topic: str, angle: str, cfg: Config, avoid: list[str] | None = None) -> Script:
@@ -199,21 +217,18 @@ def write_script(topic: str, angle: str, cfg: Config, avoid: list[str] | None = 
         sources = sources_for(topic, angle, cfg.top10.items, titles=not story)
     if story and not sources:
         raise RuntimeError(f"no sources found to write {topic!r} from")
-    raw = trends._llm(
-        prompt.format(
-            n=cfg.top10.items,
-            topic=topic,
-            angle=angle,
-            avoid=note,
-            sources=sources,
-            rules=slop.RULES,
-        ),
-        cfg,
+    filled = prompt.format(
+        n=cfg.top10.items, topic=topic, angle=angle, avoid=note, sources=sources, rules=slop.RULES
     )
-    m = re.search(r"\{.*\}", raw, re.S)
-    if not m:
-        raise ValueError("no JSON in LLM output")
-    j = json.loads(m.group(0))
+    for last in (False, True):  # a model now and then answers with no or broken JSON: ask again
+        raw = trends._llm(filled, cfg)
+        try:
+            j = json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
+            break
+        except (AttributeError, ValueError) as e:
+            if last:
+                raise ValueError("no JSON in LLM output") from e
+            log.warning("script answer was not valid JSON (%s); asking again", e)
     entries = [
         Entry(
             int(e["rank"]),
@@ -247,7 +262,7 @@ def fact_check(script: Script, cfg: Config) -> list[verify.Check]:
     if script.intro:
         claims.append((f"{script.title}: {script.intro}", script.topic))
     checks = (
-        verify.check_claims(claims, cfg, titles=False)
+        verify.check_claims(claims, cfg, titles=False, shared=article_for(script.topic))
         if story
         else verify.check_claims(claims, cfg)
     )
