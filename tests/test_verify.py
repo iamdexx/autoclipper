@@ -111,6 +111,37 @@ def test_google_news_parses_rss(monkeypatch):
     assert ev[0].source == "ESPN" and ev[0].date.startswith("Sun, 20 Sep 2026")
 
 
+def _wiki_page(title, redirects=()):
+    para = f"{title} is a video game whose history is long enough to be a real paragraph here."
+    return {
+        "title": title,
+        "redirects": [{"title": r} for r in redirects],
+        "extract": para,
+    }
+
+
+def test_wiki_extract_skips_article_that_only_cites_the_query(monkeypatch):
+    pages = {}
+
+    class R:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"query": {"pages": pages}}
+
+    monkeypatch.setattr(verify.requests, "get", lambda *a, **k: R())
+    # a YouTube title as the topic: the only full-text hit cites "GTA" in a reference
+    pages["1"] = _wiki_page("Space Invaders", ["Space Invaders (arcade game)"])
+    assert verify.wiki_extract("GTA 6 Review Roundup - Luke Reacts") == []
+    # an article the query names through a redirect is used
+    pages["1"] = _wiki_page("Grand Theft Auto VI", ["GTA 6", "GTA VI"])
+    ev = verify.wiki_extract("GTA 6 Review Roundup - Luke Reacts")
+    assert ev and ev[0].title.startswith("Grand Theft Auto VI:")
+    pages["1"] = _wiki_page("Space Invaders")
+    assert verify.wiki_extract("Why did Space Invaders speed up?")
+
+
 def test_gather_survives_failing_sources(monkeypatch):
     def boom(q):
         raise RuntimeError("down")
