@@ -10,6 +10,7 @@ import json
 import logging
 import re
 import subprocess
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -164,23 +165,54 @@ def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:40] or "top10"
 
 
-@functools.lru_cache(maxsize=8)
-def _article(topic: str) -> tuple[verify.Evidence, ...]:
-    # capped once, here: the writer and the fact-check judge are shown the same paragraphs
-    return tuple(verify.wiki_extract(topic, chars=24000)[:60])
+SUBJECT_PROMPT = """A short video will answer: "{topic}"
+Which ONE English Wikipedia article tells that story? Answer with the exact title of the article
+and nothing else."""
+
+ARTICLE_RETRY_S = 20
+_articles: dict[str, tuple[verify.Evidence, ...]] = {}
 
 
-def article_for(topic: str) -> list[verify.Evidence]:
+def _article(topic: str, cfg: Config | None) -> tuple[verify.Evidence, ...]:
+    """A search by the question's own words finds whatever article shares them ("Why did the US
+    plan to nuke the Moon?" found the Democratic Party), so the model names the article first."""
+    queries = [topic]
+    if cfg is not None:
+        try:
+            lines = trends._llm(SUBJECT_PROMPT.format(topic=topic), cfg).strip().splitlines()
+            name = lines[-1].strip(" \"'*.") if lines else ""
+            if 0 < len(name) <= 100:
+                queries.insert(0, name)
+        except Exception as e:
+            log.warning("could not name the article for %r: %s", topic, e)
+    for q in queries:
+        # capped once, here: the writer and the fact-check judge are shown the same paragraphs
+        found = tuple(verify.wiki_extract(q, chars=24000)[:60])
+        if found:
+            log.info("article for %r: %s", topic, found[0].title.split(":")[0])
+            return found
+    return ()
+
+
+def article_for(topic: str, cfg: Config | None = None) -> list[verify.Evidence]:
     """The Wikipedia article an explainer is written from and checked against ([] when the
     lookup fails): a search by each line's wording rarely finds the paragraph that backs it."""
-    try:
-        return list(_article(topic))
-    except Exception as e:
-        log.warning("no article for %r: %s", topic, e)
-        return []
+    for last in (False, True):  # Wikipedia now and then answers 429: once more after a pause
+        if topic in _articles:
+            break
+        try:
+            _articles[topic] = _article(topic, cfg)
+        except Exception as e:
+            log.warning("no article for %r: %s", topic, e)
+            if last:
+                return []
+            time.sleep(ARTICLE_RETRY_S)
+    return list(_articles[topic])
 
 
-def sources_for(topic: str, angle: str, n: int, titles: bool = True) -> str:
+def sources_for(
+    topic: str, angle: str, n: int, titles: bool = True, cfg: Config | None = None
+) -> str:
     """Evidence block for the script prompt: the same keyless retrieval the fact-check judges
     against (news, wiki, and YouTube titles unless `titles` is off), so the writer picks moments
     that will later verify."""
@@ -193,7 +225,7 @@ def sources_for(topic: str, angle: str, n: int, titles: bool = True) -> str:
         if angle and angle.lower() not in topic.lower():
             ev += verify.gather(angle[:120], titles=False)
     if not titles:  # the article first and in full: every beat has to come out of it
-        ev = [*article_for(topic), *ev]
+        ev = [*article_for(topic, cfg), *ev]
     seen: set[str] = set()
     items = []
     for e in ev:
@@ -217,7 +249,7 @@ def write_script(topic: str, angle: str, cfg: Config, avoid: list[str] | None = 
     story = cfg.top10.style == "explainer"
     sources = ""
     if cfg.verify.enabled or story:
-        sources = sources_for(topic, angle, cfg.top10.items, titles=not story)
+        sources = sources_for(topic, angle, cfg.top10.items, titles=not story, cfg=cfg)
     if story and not sources:
         raise RuntimeError(f"no sources found to write {topic!r} from")
     filled = prompt.format(
@@ -266,7 +298,7 @@ def fact_check(script: Script, cfg: Config) -> list[verify.Check]:
     if script.intro:
         claims.append((f"{script.title}: {script.intro}", script.topic))
     checks = (
-        verify.check_claims(claims, cfg, titles=False, shared=article_for(script.topic))
+        verify.check_claims(claims, cfg, titles=False, shared=article_for(script.topic, cfg))
         if story
         else verify.check_claims(claims, cfg)
     )
@@ -354,7 +386,7 @@ def _same_fact(a: str, b: str) -> bool:
     if m and n and not (m <= n or n <= m):
         return False
     x, y = _keywords(a), _keywords(b)
-    return bool(x and y) and len(x & y) >= 0.6 * min(len(x), len(y))
+    return bool(x and y) and len(x & y) >= 0.5 * min(len(x), len(y))
 
 
 def footage_matches(entry: Entry, title: str) -> bool:

@@ -1912,3 +1912,34 @@ def test_two_lines_telling_the_same_fact_are_recognised():
         "Trailer 1 drew 93 million views in 24 hours.",
         "Trailer 2 drew 475 million views in 24 hours.",
     )
+
+
+def test_explainer_article_is_the_one_the_model_names(tmp_path, monkeypatch):
+    from autoclipper import top10, trends, verify
+
+    cfg = _cfg(tmp_path)
+    asked = []
+
+    def extract(q, chars=0):
+        asked.append(q)
+        if q == "Project A119":
+            return [verify.Evidence("article", "Project A119: a plan to nuke the Moon")]
+        if q == "Busy":
+            raise RuntimeError("429")
+        return []
+
+    monkeypatch.setattr(verify, "wiki_extract", extract)
+    monkeypatch.setattr(top10, "ARTICLE_RETRY_S", 0)
+    monkeypatch.setattr(top10, "_articles", {})
+    monkeypatch.setattr(trends, "_llm", lambda p, c: "**Project A119**")
+    got = top10.article_for("Why did the US plan to nuke the Moon?", cfg)
+    assert [e.title for e in got] == ["Project A119: a plan to nuke the Moon"]
+    assert asked == ["Project A119"]
+    assert top10.article_for("Why did the US plan to nuke the Moon?", cfg) == got  # kept
+    assert asked == ["Project A119"]
+    # the model cannot be asked: the topic's own words are searched
+    monkeypatch.setattr(trends, "_llm", lambda p, c: 1 / 0)
+    assert top10.article_for("Moon cheese", cfg) == [] and asked[-1] == "Moon cheese"
+    # Wikipedia refuses: asked once more, then the story goes without
+    monkeypatch.setattr(trends, "_llm", lambda p, c: "Busy")
+    assert top10.article_for("Busy topic", cfg) == [] and asked[-2:] == ["Busy", "Busy"]
