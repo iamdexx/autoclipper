@@ -451,6 +451,7 @@ def tts_nvidia(text: str, voice: str, out: Path) -> Path:
         check=True,
     )
     wav.unlink(missing_ok=True)
+    log.info("narrator %s spoke %s", voice.rsplit(".", 1)[-1], out)
     return out
 
 
