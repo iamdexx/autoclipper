@@ -379,10 +379,16 @@ def has_video(path: Path) -> bool:
 
 
 def fetch_footage(
-    entry: Entry, secs: float, dest: Path, cfg: Config, max_s: float = 0
+    entry: Entry,
+    secs: float,
+    dest: Path,
+    cfg: Config,
+    max_s: float = 0,
+    skip: frozenset[str] = frozenset(),
 ) -> Path | None:
     """Download only a `secs`-long window from the best-matching video (yt-dlp sections).
-    `max_s`: the longest video to take it from (default: top10.source_max_duration_s)."""
+    `max_s`: the longest video to take it from (default: top10.source_max_duration_s).
+    `skip`: ids of videos not to take it from."""
     key = hashlib.sha1(f"{entry.name}|{entry.query}".encode()).hexdigest()[:8]
     out = dest / f"{entry.rank:02d}-{_slug(entry.name)[:30]}-{key}.mp4"
     if out.exists():
@@ -401,7 +407,9 @@ def fetch_footage(
     cands = [
         c
         for c in cands
-        if footage_matches(entry, c.title) and trends.rights_ok(c.title, c.channel, cfg)
+        if c.id not in skip
+        and footage_matches(entry, c.title)
+        and trends.rights_ok(c.title, c.channel, cfg)
     ]
     cands.sort(key=lambda c: -c.views)
     for c in cands[:3]:
@@ -435,26 +443,34 @@ def footage_stills(script: Script, n: int, cfg: Config, dest: Path) -> list[Path
     photograph fits: a photo library has nothing for a game. Each frame is checked first."""
     if n <= 0 or not script.footage:
         return []
-    # clean footage of a game is mostly hours-long walkthroughs; only a window is downloaded
-    clip = fetch_footage(Entry(0, "", "", script.footage), 120, dest, cfg, max_s=12 * 3600)
-    if clip is None:
-        log.warning("no footage found for %r", script.footage)
-        return []
     dest.mkdir(parents=True, exist_ok=True)
-    dur = narrate.duration(clip)
     out: list[Path] = []
-    looks = n * 3
-    for i in range(looks):
-        if len(out) == n:
+    tried: set[str] = set()
+    for k in range(3):  # one upload may carry its channel's watermark throughout: try others
+        if len(out) >= n:
             break
-        f = dest / f"still-{i:02d}.jpg"
-        subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{dur * (i + 0.5) / looks:.3f}"]
-            + ["-i", str(clip), "-frames:v", "1", "-q:v", "2", str(f)],
-            check=False,
-        )
-        if f.exists() and review.backdrop(f, script.footage, cfg):
-            out.append(f)
+        # clean footage of a game is mostly hours-long walkthroughs; only a window is downloaded
+        src = Entry(k, "", "", script.footage)
+        clip = fetch_footage(src, 120, dest, cfg, max_s=12 * 3600, skip=frozenset(tried))
+        if clip is None:
+            log.warning("no more footage found for %r", script.footage)
+            break
+        tried.add(src.video_id)
+        dur = narrate.duration(clip)
+        looks = (n - len(out)) * 3
+        for i in range(looks):
+            if len(out) == n:
+                break
+            f = dest / f"still-{k}-{i:02d}.jpg"
+            subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{dur * (i + 0.5) / looks:.3f}"]
+                + ["-i", str(clip), "-frames:v", "1", "-q:v", "2"]
+                # a game's own subtitles and button prompts sit at the bottom of the frame
+                + ["-vf", "crop=iw:ih*0.78:0:0", str(f)],
+                check=False,
+            )
+            if f.exists() and review.backdrop(f, script.footage, cfg):
+                out.append(f)
     return out
 
 

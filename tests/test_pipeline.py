@@ -1852,8 +1852,10 @@ def test_explainer_beats_without_a_photo_get_checked_footage_frames(tmp_path, mo
     clip = _synthetic(tmp_path, "clip.mp4", 6)
     asked = {}
 
-    def fetch(entry, secs, dest, cfg, max_s=0):
+    def fetch(entry, secs, dest, cfg, max_s=0, skip=frozenset()):
         asked.update(query=entry.query, max_s=max_s)
+        asked.setdefault("skips", []).append(skip)
+        entry.video_id = f"v{entry.rank}"
         return clip
 
     monkeypatch.setattr(top10, "fetch_footage", fetch)
@@ -1865,6 +1867,11 @@ def test_explainer_beats_without_a_photo_get_checked_footage_frames(tmp_path, mo
     got = top10.footage_stills(s, 2, cfg, tmp_path / "f")
     assert len(got) == 2 and all(p.exists() for p in got) and len(seen) == 4  # refused: skipped
     assert asked["query"] == s.footage and asked["max_s"] > cfg.top10.source_max_duration_s
+    # a source with no clean frame is not asked for again: the next one is tried
+    monkeypatch.setattr(review, "backdrop", lambda p, subject, cfg: False)
+    asked["skips"] = []
+    assert top10.footage_stills(s, 1, cfg, tmp_path / "h") == []
+    assert asked["skips"] == [frozenset(), {"v0"}, {"v0", "v1"}]
     s.footage = ""  # a story about the real world has no footage to fall back on
     assert top10.footage_stills(s, 2, cfg, tmp_path / "g") == []
 

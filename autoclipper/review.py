@@ -162,8 +162,8 @@ BACKDROP_PROMPT = """This frame will fill the screen of a short video, behind a 
 story about: {subject}
 Is it a clean picture of that subject (for a game: the game itself being played or one of its
 scenes)? A frame with a person in a webcam box, a channel's logo, name or @handle, captions or
-other added text, a menu, a loading or title screen, a screenshot of a post or an article, or a
-frame of something else is a "no".
+other added text, subtitles or button prompts, a menu, a loading or title screen, a screenshot
+of a post or an article, or a frame of something else is a "no".
 Return JSON only: {{"shows": "<what the frame shows, a few words>", "fits": true|false}}"""
 
 
