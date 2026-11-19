@@ -659,9 +659,13 @@ def build_listicle(script: Script, cfg: Config, vdir: Path) -> Path:
         pic = pics[id(entry)]
         if isinstance(pic, Shot):
             # the intro and the outro share a beat's footage: it plays on, it does not restart
-            at = played.get(id(entry), 0.0)
+            # ...but never past the SHOT_S that were checked: a line too long for what is left
+            # starts earlier, and one longer than the whole stretch holds its last frame
+            at = min(played.get(id(entry), 0.0), max(0.0, SHOT_S - dur))
             played[id(entry)] = at + dur
-            render.render_shot(pic.clip, pic.start + at, dur, voice, words, cfg, seg, title=title)
+            render.render_shot(
+                pic.clip, pic.start + at, dur, voice, words, cfg, seg, title, SHOT_S - at
+            )
         else:
             render.render_still(
                 pic, dur, voice, words, cfg, seg, zoom_in=zoom_in, title=title, fill=story

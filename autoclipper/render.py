@@ -418,10 +418,12 @@ def render_shot(
     cfg: Config,
     out: Path,
     title: str = "",
+    footage_s: float | None = None,
 ) -> Path:
     """One beat of a story over moving footage: `dur` seconds of `clip` from `start`, its middle
     filling the frame, its own sound off, captions in the global style, narration as the only
-    audio. Footage that runs out holds its last frame."""
+    audio. At most `footage_s` seconds of the footage are shown; footage that runs out holds
+    its last frame."""
     out.parent.mkdir(parents=True, exist_ok=True)
     ass_path = out.with_suffix(".ass")
     ass_path.write_text(build_ass(words, title, dur, cfg, badge=""))
@@ -430,7 +432,8 @@ def render_shot(
         f"crop={W}:{H},fps={FPS},setsar=1,tpad=stop_mode=clone:stop_duration={dur:.3f},"
         f"ass={ass_path.as_posix()}[v]"
     )
-    inputs = ["-ss", f"{max(0.0, start):.3f}", "-t", f"{dur:.3f}", "-i", str(clip)]
+    shown = dur if footage_s is None else max(0.1, min(dur, footage_s))
+    inputs = ["-ss", f"{max(0.0, start):.3f}", "-t", f"{shown:.3f}", "-i", str(clip)]
     if voice:
         inputs += ["-i", str(voice)]
         vf += f";[1:a]{NORM},apad=whole_dur={dur:.3f},atrim=0:{dur:.3f}[a]"

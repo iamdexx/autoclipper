@@ -1890,6 +1890,17 @@ def test_story_footage_is_moving_stretches_checked_start_middle_and_end(tmp_path
     # footage that runs out holds its last frame for the rest of the line
     seg = render.render_shot(clip, 31.0, 3.0, None, [], cfg, tmp_path / "end.mp4")
     assert abs(narrate.duration(seg) - 3.0) < 0.2
+    # a line longer than the checked stretch does not run on into unchecked footage
+    seg = render.render_shot(clip, 0.0, 3.0, None, [], cfg, tmp_path / "cap.mp4", "", 1.0)
+    assert abs(narrate.duration(seg) - 3.0) < 0.2
+    first, held = (
+        subprocess.check_output(
+            ["ffmpeg", "-v", "error", "-ss", str(t), "-i", str(seg), "-frames:v", "1"]
+            + ["-f", "rawvideo", "-pix_fmt", "gray", "-s", "54x96", "-"]
+        )
+        for t in (1.5, 2.5)
+    )
+    assert first == held  # testsrc2 moves every frame: the picture stopped at 1s
     # a source with no clean frame is not asked for again: the next one is tried
     monkeypatch.setattr(review, "backdrop", lambda p, subject, cfg: False)
     asked["skips"] = []
