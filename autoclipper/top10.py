@@ -425,25 +425,40 @@ def footage_matches(entry: Entry, title: str) -> bool:
     return bool(q) and len(q & t | _acronym_hits(entry.query, title)) >= max(2, (len(q) * 2) // 3)
 
 
-_NUMERALS = dict(
-    zip("ii iii iv v vi vii viii ix xi xii".split(), "2 3 4 5 6 7 8 9 11 12".split(), strict=True)
-)
+_ROMAN = re.compile(r"(x{0,3})(ix|iv|v?i{0,3})")
+
+
+def _number(w: str) -> int | None:
+    """A sequel number as a title writes it: "6", "vi" (a lone "i" is a word, not a one)."""
+    if w.isdigit():
+        return int(w) if len(w) <= 2 else None
+    m = _ROMAN.fullmatch(w)
+    if not w or not m:
+        return None
+    ones = {"ix": 9, "iv": 4}.get(m[2], 5 * ("v" in m[2]) + m[2].count("i"))
+    n = 10 * len(m[1]) + ones
+    return n if n >= 2 else None
 
 
 def _acronym_hits(query: str, title: str) -> set[str]:
     """Query words a title says by their initials: uploads of "Grand Theft Auto VI" are titled
-    "GTA 6". A sequel number after the name has to be in the title too (GTA 5 is not GTA 6)."""
+    "GTA 6". A sequel number after the name has to follow the initials in the title too ("GTA 5
+    Walkthrough Part 6" is not GTA 6)."""
     words = re.findall(r"[a-z0-9]+", query.lower())
-    said = set(re.findall(r"[a-z0-9]+", title.lower()))
+    said = re.findall(r"[a-z0-9]+", title.lower())
     hits: set[str] = set()
     for i in range(len(words)):
         for j in range(i + 3, min(len(words), i + 5) + 1):
-            if "".join(w[0] for w in words[i:j]) not in said:
-                continue
-            n = words[j] if j < len(words) else ""
-            n = _NUMERALS.get(n, n if n.isdigit() and len(n) <= 2 else "")
-            roman = {r for r, d in _NUMERALS.items() if d == n}
-            if not n or said & ({n} | roman):
+            a = "".join(w[0] for w in words[i:j])
+            n = _number(words[j]) if j < len(words) else None
+            if n is None:
+                ok = a in said
+            else:
+                ok = any(
+                    w == f"{a}{n}" or (w == a and k + 1 < len(said) and _number(said[k + 1]) == n)
+                    for k, w in enumerate(said)
+                )
+            if ok:
                 hits |= _keywords(" ".join(words[i:j]))
     return hits
 
