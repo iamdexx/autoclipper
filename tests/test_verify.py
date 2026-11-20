@@ -547,6 +547,8 @@ def test_a_story_already_made_is_not_told_again(tmp_path, monkeypatch):
     assert not top10.same_story("How GTA 6 Broke Every Launch Record", "Why GTA 6 Took 13 Years")
     assert not top10.same_story("What 7 GTA 6 Details Reveal", "Why GTA 6 Took 13 Years")
     assert not top10.same_story("Can You Explore All Of Leonida?", "Why GTA 6 Took 13 Years")
+    assert top10.same_story("Why We Sleep", "Why We Sleep")
+    assert not top10.same_story("Why We Sleep", "Why Sleep Helps Memory")
     cfg = _cfg(tmp_path)
     cfg.top10.style = "explainer"
     _no_net(monkeypatch)
@@ -578,3 +580,34 @@ def test_made_titles_are_the_finished_videos(tmp_path):
     st.mark_topic("top10", "c", status="qa_failed", title="C")
     st.mark_topic("top10", "d", status="done", title="D")
     assert st.made_titles("top10") == ["A", "D"]
+
+
+def test_a_ranking_may_reuse_its_recurring_title(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.verify.enabled = False
+    told = []
+
+    def fake_write(topic, angle, c, avoid=None, made=()):
+        told.append(list(made))
+        return _script()
+
+    monkeypatch.setattr(top10, "write_script", fake_write)
+    s = top10.verified_script("nfl", "", cfg, tmp_path, made=["Top 10"])
+    assert s.title == "Top 10" and told == [[]]
+
+
+def test_a_retried_topic_keeps_its_finished_title_in_the_history(tmp_path, monkeypatch):
+    from autoclipper.state import State
+
+    cfg = _cfg(tmp_path)
+    st = State(tmp_path / "s.json")
+    st.mark_topic("top10", "gta 6", status="done", title="Why GTA 6 Took 13 Years")
+    seen = []
+
+    def fake_make(topic, angle, c, vdir, made=()):
+        seen.append(list(made))
+        raise RuntimeError("again")
+
+    monkeypatch.setattr(top10, "make", fake_make)
+    assert pipeline.make_top10("gta 6", "", cfg, st) is None
+    assert seen == [["Why GTA 6 Took 13 Years"]]

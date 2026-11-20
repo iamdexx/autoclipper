@@ -352,6 +352,7 @@ def verified_script(
     v = cfg.verify
     strict = v.strict or v.strict_top10
     story = cfg.top10.style == "explainer"
+    made = made if story else ()  # a ranking or countdown is a new list under a recurring title
     script = first = write_script(topic, angle, cfg, made=made)
     again = next((m for m in made if same_story(first.title, m)), None)
     if again:
@@ -449,6 +450,8 @@ def same_story(a: str, b: str) -> bool:
     x, y = _story_words(a), _story_words(b)
     if not x or not y:
         return False
+    if x == y:
+        return True
     xs, ys = x | (_initials(a) & y), y | (_initials(b) & x)
     cover = max(len(x & ys) / len(x), len(y & xs) / len(y))
     return len(xs & ys) >= 2 and cover >= 0.75
