@@ -422,7 +422,30 @@ def footage_matches(entry: Entry, title: str) -> bool:
     if name and len(name & t) >= max(1, len(name) // 2):
         return True
     q = _keywords(entry.query)
-    return bool(q) and len(q & t) >= max(2, (len(q) * 2) // 3)
+    return bool(q) and len(q & t | _acronym_hits(entry.query, title)) >= max(2, (len(q) * 2) // 3)
+
+
+_NUMERALS = dict(
+    zip("ii iii iv v vi vii viii ix xi xii".split(), "2 3 4 5 6 7 8 9 11 12".split(), strict=True)
+)
+
+
+def _acronym_hits(query: str, title: str) -> set[str]:
+    """Query words a title says by their initials: uploads of "Grand Theft Auto VI" are titled
+    "GTA 6". A sequel number after the name has to be in the title too (GTA 5 is not GTA 6)."""
+    words = re.findall(r"[a-z0-9]+", query.lower())
+    said = set(re.findall(r"[a-z0-9]+", title.lower()))
+    hits: set[str] = set()
+    for i in range(len(words)):
+        for j in range(i + 3, min(len(words), i + 5) + 1):
+            if "".join(w[0] for w in words[i:j]) not in said:
+                continue
+            n = words[j] if j < len(words) else ""
+            n = _NUMERALS.get(n, n if n.isdigit() and len(n) <= 2 else "")
+            roman = {r for r, d in _NUMERALS.items() if d == n}
+            if not n or said & ({n} | roman):
+                hits |= _keywords(" ".join(words[i:j]))
+    return hits
 
 
 def has_video(path: Path) -> bool:
