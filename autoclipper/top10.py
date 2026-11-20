@@ -11,6 +11,7 @@ import logging
 import re
 import subprocess
 import time
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
@@ -111,7 +112,7 @@ EXPLAINER_PROMPT = """Write the script for a short narrated explainer (TikTok / 
 45-60 seconds) about: {topic}
 Context: {angle}
 It is a story, not a list. The title is a question or claim people want answered ("How Humans
-Survived The Ice Age", "Why GTA 6 Took 13 Years"). The intro states the puzzle in one sentence.
+Survived The Ice Age", "Why The Titanic's Lookouts Had No Binoculars"). The intro states the puzzle in one sentence.
 Then {n} beats, each one or two sentences, each adding ONE specific fact that moves the story
 forward (who, what number, what happened next), in the order a good teacher would tell it. The
 last beat answers the title. A viewer who stops after any beat should already have learned
@@ -252,10 +253,17 @@ def sources_for(
     return SOURCES_NOTE.format(n=n, items="\n".join(items[: 40 if titles else 70]))
 
 
-def write_script(topic: str, angle: str, cfg: Config, avoid: list[str] | None = None) -> Script:
+def write_script(
+    topic: str, angle: str, cfg: Config, avoid: list[str] | None = None, made: Sequence[str] = ()
+) -> Script:
     note = ""
     if avoid:
         note = "Do NOT use these (they failed a fact-check): " + "; ".join(avoid[:30])
+    if made:
+        note += (
+            "\nThis channel already made these videos; tell a different story (another question"
+            " with another answer), never one of these again: " + "; ".join(made[-30:])
+        )
     prompt = _PROMPTS.get(cfg.top10.style, SCRIPT_PROMPT)
     story = cfg.top10.style == "explainer"
     sources = ""
@@ -334,14 +342,20 @@ def fact_check(script: Script, cfg: Config) -> list[verify.Check]:
     return checks
 
 
-def verified_script(topic: str, angle: str, cfg: Config, vdir: Path) -> Script:
+def verified_script(
+    topic: str, angle: str, cfg: Config, vdir: Path, made: Sequence[str] = ()
+) -> Script:
     """Write a script, drop entries that fail the fact-check, refill from a fresh draft (up to
-    verify.max_rounds), re-rank 10..1. Raises if fewer than verify.min_entries survive, or if a
-    story's opening line fails and its title, checked by itself, fails too."""
+    verify.max_rounds), re-rank 10..1. Raises if fewer than verify.min_entries survive, if a
+    story's opening line fails and its title, checked by itself, fails too, or if the title
+    tells a story the channel already made (`made`: titles of earlier videos)."""
     v = cfg.verify
     strict = v.strict or v.strict_top10
     story = cfg.top10.style == "explainer"
-    script = first = write_script(topic, angle, cfg)
+    script = first = write_script(topic, angle, cfg, made=made)
+    again = next((m for m in made if same_story(first.title, m)), None)
+    if again:
+        raise RuntimeError(f"{first.title!r} tells the story of {again!r} again")
     if not v.enabled:
         return script
     opened = bool(first.intro)
@@ -414,6 +428,30 @@ def _same_fact(a: str, b: str) -> bool:
         return False
     x, y = _keywords(a), _keywords(b)
     return bool(x and y) and len(x & y) >= 0.5 * min(len(x), len(y))
+
+
+_ASKS = {"how", "why", "what", "who", "when", "where", "which", "does", "did", "can", "you"}
+
+
+def _story_words(s: str) -> set[str]:
+    return {w for w in _keywords(s) if w not in _ASKS and _number(w) is None and not w.isdigit()}
+
+
+def _initials(s: str) -> set[str]:
+    w = re.findall(r"[a-z0-9]+", s.lower())
+    return {"".join(x[0] for x in w[i:j]) for i in range(len(w)) for j in range(i + 3, i + 6)}
+
+
+def same_story(a: str, b: str) -> bool:
+    """Two video titles that ask the same question: "Why Grand Theft Auto VI Took 12 Years" and
+    "Why GTA 6 Took 13 Years" (a name or its initials, the figures aside). Most of one title's
+    words are in the other."""
+    x, y = _story_words(a), _story_words(b)
+    if not x or not y:
+        return False
+    xs, ys = x | (_initials(a) & y), y | (_initials(b) & x)
+    cover = max(len(x & ys) / len(x), len(y & xs) / len(y))
+    return len(xs & ys) >= 2 and cover >= 0.75
 
 
 def footage_matches(entry: Entry, title: str) -> bool:
@@ -898,7 +936,9 @@ def narration_text(script: Script, cfg: Config | None = None) -> str:
     return " ".join([intro, *(e.line for e in script.entries), outro]).strip()
 
 
-def make(topic: str, angle: str, cfg: Config, vdir: Path) -> tuple[Path, Script]:
-    script = verified_script(topic, angle, cfg, vdir)
+def make(
+    topic: str, angle: str, cfg: Config, vdir: Path, made: Sequence[str] = ()
+) -> tuple[Path, Script]:
+    script = verified_script(topic, angle, cfg, vdir, made)
     log.info("top10 %r: %d entries", script.title, len(script.entries))
     return build(script, cfg, vdir), script

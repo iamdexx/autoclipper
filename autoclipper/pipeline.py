@@ -282,7 +282,7 @@ def make_top10(
     vdir = cfg.workdir / "top10" / key
     state.mark_topic("top10", topic, status="building")
     try:
-        out, script = top10.make(topic, angle, cfg, vdir)
+        out, script = top10.make(topic, angle, cfg, vdir, state.made_titles("top10"))
     except Exception as e:
         log.exception("top10 %r failed: %s", topic, e)
         state.mark_topic("top10", topic, status="error", error=str(e))

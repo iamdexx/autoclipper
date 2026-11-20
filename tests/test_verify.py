@@ -208,7 +208,7 @@ def test_verified_script_drops_refills_and_reranks(tmp_path, monkeypatch):
     drafts = iter([_script(), None])
     prompts = []
 
-    def fake_write(topic, angle, c, avoid=None):
+    def fake_write(topic, angle, c, avoid=None, made=()):
         prompts.append(avoid or [])
         s = next(drafts)
         if s is None:  # refill draft: two new verified entries + a repeat
@@ -540,3 +540,41 @@ def test_a_story_whose_opening_claim_cannot_be_verified_is_held_to_its_beats_bar
     monkeypatch.setattr(verify, "check_claims", check)
     with pytest.raises(RuntimeError, match="title 'Top 10' is not supported"):
         top10.verified_script("nfl", "", cfg, tmp_path)
+
+
+def test_a_story_already_made_is_not_told_again(tmp_path, monkeypatch):
+    assert top10.same_story("Why Grand Theft Auto VI Took 12 Years", "Why GTA 6 Took 13 Years")
+    assert not top10.same_story("How GTA 6 Broke Every Launch Record", "Why GTA 6 Took 13 Years")
+    assert not top10.same_story("What 7 GTA 6 Details Reveal", "Why GTA 6 Took 13 Years")
+    assert not top10.same_story("Can You Explore All Of Leonida?", "Why GTA 6 Took 13 Years")
+    cfg = _cfg(tmp_path)
+    cfg.top10.style = "explainer"
+    _no_net(monkeypatch)
+    monkeypatch.setattr(top10, "sources_for", lambda *a, **k: "SOURCES")
+    prompts = []
+
+    def llm(prompt, c):
+        prompts.append(prompt)
+        return json.dumps(
+            {
+                "title": "Why Grand Theft Auto VI Took 12 Years",
+                "intro": "",
+                "entries": [{"rank": 1, "name": "a", "line": "l", "query": "q"}],
+            }
+        )
+
+    monkeypatch.setattr(top10.trends, "_llm", llm)
+    with pytest.raises(RuntimeError, match="again"):
+        top10.verified_script("gta 6", "", cfg, tmp_path, made=["Why GTA 6 Took 13 Years"])
+    assert "never one of these again: Why GTA 6 Took 13 Years" in prompts[0]
+
+
+def test_made_titles_are_the_finished_videos(tmp_path):
+    from autoclipper.state import State
+
+    st = State(tmp_path / "s.json")
+    st.mark_topic("top10", "a", status="done", title="A")
+    st.mark_topic("top10", "b", status="error", error="x")
+    st.mark_topic("top10", "c", status="qa_failed", title="C")
+    st.mark_topic("top10", "d", status="done", title="D")
+    assert st.made_titles("top10") == ["A", "D"]
