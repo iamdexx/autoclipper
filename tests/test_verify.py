@@ -272,6 +272,21 @@ def test_footage_must_match_entry():
     assert not top10.footage_matches(e, "Best Hurdles in Football History")
 
 
+def test_footage_matches_a_game_titled_by_its_initials():
+    e = top10.Entry(0, "", "", "Grand Theft Auto VI gameplay no commentary")
+    assert top10.footage_matches(e, "GTA 6 Gameplay Walkthrough Part 1 FULL GAME - No Commentary")
+    assert top10.footage_matches(e, "GTA VI - Full Game Walkthrough (No Commentary) 100% 4K")
+    assert not top10.footage_matches(e, "GTA 5 Gameplay Walkthrough (No Commentary)")
+    assert not top10.footage_matches(e, "Minecraft Gameplay No Commentary")
+    d = top10.Entry(0, "", "", "Red Dead Redemption 2 gameplay no commentary")
+    assert top10.footage_matches(d, "RDR 2 PC Gameplay (No Commentary)")
+    assert top10.footage_matches(d, "RDR2 gameplay no commentary")
+    assert not top10.footage_matches(e, "GTA 5 Gameplay Walkthrough Part 6 (No Commentary)")
+    k = top10.Entry(0, "", "", "The King of Fighters XIII gameplay no commentary")
+    assert top10.footage_matches(k, "KOF XIII Arcade Gameplay No Commentary")
+    assert not top10.footage_matches(k, "KOF 2002 Gameplay No Commentary")
+
+
 def test_check_hook_rewrites_unfaithful(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
     monkeypatch.setattr(
