@@ -116,6 +116,12 @@ Then {n} beats, each one or two sentences, each adding ONE specific fact that mo
 forward (who, what number, what happened next), in the order a good teacher would tell it. The
 last beat answers the title. A viewer who stops after any beat should already have learned
 something.
+It is read aloud by one narrator, so write it the way a person tells a friend a story, not the
+way an encyclopedia lists facts: plain everyday words, short sentences, active verbs with someone
+doing something ("Rockstar started in 2014", not "Preliminary work began in 2014"). Every beat
+after the first picks up from the one before it (a cause, a consequence, a turn; in your own
+words) instead of starting cold, and every beat is about the title's question: leave out a true fact
+that does not help answer it. The last beat says the answer in so many words.
 {rules}
 Use ONLY facts that appear in the SOURCES below; if the sources do not support {n} beats, return
 fewer. No predictions, no rumours stated as fact.
@@ -127,7 +133,8 @@ Use one word for one thing from the title to the last beat (if the title says "r
 say "railroad"), and the spelling of the place the story is set in. Open the intro on the single
 most surprising fact. Each beat's photo must show what that beat talks about.
 Narration is plain spoken words only: no emojis, hashtags, stage directions or numbering.
-Write every number in digits ("475 million", "1.65 billion", "13 years"), never spelled out: the
+Write every number in digits ("475 million", "1.65 billion", "13 years"), never spelled out, in
+the title and the intro too: the
 line is shown on screen a few words at a time, and "seventy-five million" alone reads as wrong.
 Return ONLY JSON:
 {{"title": "<the question or claim, max 9 words, Title Case>",
