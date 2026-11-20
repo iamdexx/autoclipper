@@ -280,9 +280,10 @@ def make_top10(
 ) -> Path | None:
     key = _slug(topic)
     vdir = cfg.workdir / "top10" / key
+    made = state.made_titles("top10")
     state.mark_topic("top10", topic, status="building")
     try:
-        out, script = top10.make(topic, angle, cfg, vdir)
+        out, script = top10.make(topic, angle, cfg, vdir, made)
     except Exception as e:
         log.exception("top10 %r failed: %s", topic, e)
         state.mark_topic("top10", topic, status="error", error=str(e))

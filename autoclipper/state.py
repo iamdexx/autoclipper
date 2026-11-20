@@ -42,6 +42,15 @@ class State:
         items = self.data.get("topics", {}).get(kind, {})
         return [name for name, _ in sorted(items.items(), key=lambda kv: kv[1].get("at", 0))]
 
+    def made_titles(self, kind: str) -> list[str]:
+        """Titles of the videos made for `kind` (finished and past QA), oldest first."""
+        items = self.data.get("topics", {}).get(kind, {}).values()
+        done = sorted(
+            (t for t in items if t.get("status") == "done" and t.get("title")),
+            key=lambda t: t.get("at", 0),
+        )
+        return [t["title"] for t in done]
+
     def mark_topic(self, kind: str, name: str, **extra) -> None:
         self.data.setdefault("topics", {}).setdefault(kind, {})[name] = {
             "at": time.time(),
