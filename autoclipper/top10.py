@@ -324,7 +324,9 @@ def fact_check(script: Script, cfg: Config) -> list[verify.Check]:
     if script.intro:
         c = checks[-1]
         log.info("fact-check intro -> %s (%.2f) %s", c.verdict, c.confidence, c.note)
-        if not verify.passes(c, cfg) or slop.filler(script.intro):
+        # the opening claim is held to the same bar as the entries it introduces
+        strict = cfg.verify.strict or cfg.verify.strict_top10
+        if not verify.passes(c, cfg, strict=strict) or slop.filler(script.intro):
             log.warning("intro rejected, dropping it: %r / %r", script.title, script.intro)
             script.intro = ""
             if cfg.top10.style not in ("ranking", "explainer"):  # their title is not the hook
