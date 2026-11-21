@@ -354,13 +354,18 @@ def _call_openai(prompt: str, model: str | None) -> str:
 def _parse_json_array(text: str) -> list[dict]:
     """The first JSON array of objects in an answer, ignoring any prose or brackets around it."""
     dec = json.JSONDecoder()
+    empty = False
     for m in re.finditer(r"\[", text):
         try:
             j, _ = dec.raw_decode(text, m.start())
         except ValueError:
             continue
         if isinstance(j, list) and all(isinstance(x, dict) for x in j):
-            return j
+            if j:
+                return j
+            empty = True
+    if empty:
+        return []
     raise ValueError("no JSON array in LLM output")
 
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from autoclipper import cli, pipeline, top10, trends, verify
+from autoclipper import cli, pipeline, rank, top10, trends, verify
 from autoclipper.config import Config
 from autoclipper.ingest import Segment
 from autoclipper.rank import Moment
@@ -188,12 +188,15 @@ def test_judge_answer_with_text_after_its_json_is_still_read(tmp_path, monkeypat
     ]
 
     def fake(p, c):
-        return f"Verdicts [2 claims]:\n{json.dumps(verdicts)}\nNote: see sources [1] and [2]."
+        return f"Not [] this time [2 claims]:\n{json.dumps(verdicts)}\nNote: see [1] and [2]."
 
     monkeypatch.setattr(trends, "_llm", fake)
     checks = verify.check_claims([("a", "qa"), ("b", "qb")], cfg)
     assert [c.verdict for c in checks] == ["supported", "unsupported"]
     assert checks[0].note == "Wikipedia [1] says so"
+    assert rank._parse_json_array("None found: []") == []
+    with pytest.raises(ValueError):
+        rank._parse_json_array("see [1]")
 
 
 def test_judge_failure_is_unverifiable_not_pass(tmp_path, monkeypatch):
