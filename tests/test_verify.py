@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from autoclipper import cli, pipeline, top10, trends, verify
+from autoclipper import cli, pipeline, rank, top10, trends, verify
 from autoclipper.config import Config
 from autoclipper.ingest import Segment
 from autoclipper.rank import Moment
@@ -177,6 +177,26 @@ def test_check_claims_parses_verdicts(tmp_path, monkeypatch):
     assert [c.verdict for c in checks] == ["supported", "unsupported", "unverifiable"]
     assert "some headline" in seen["p"] and "CLAIM 2: c" in seen["p"]
     assert checks[0].evidence[0].title == "some headline"
+
+
+def test_judge_answer_with_text_after_its_json_is_still_read(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    _no_net(monkeypatch, [verify.Evidence("news", "some headline")])
+    verdicts = [
+        {"i": 0, "verdict": "supported", "confidence": 0.9, "note": "Wikipedia [1] says so"},
+        {"i": 1, "verdict": "unsupported", "confidence": 0.8, "note": "no"},
+    ]
+
+    def fake(p, c):
+        return f"Not [] this time [2 claims]:\n{json.dumps(verdicts)}\nNote: see [1] and [2]."
+
+    monkeypatch.setattr(trends, "_llm", fake)
+    checks = verify.check_claims([("a", "qa"), ("b", "qb")], cfg)
+    assert [c.verdict for c in checks] == ["supported", "unsupported"]
+    assert checks[0].note == "Wikipedia [1] says so"
+    assert rank._parse_json_array("None found: []") == []
+    with pytest.raises(ValueError):
+        rank._parse_json_array("see [1]")
 
 
 def test_judge_failure_is_unverifiable_not_pass(tmp_path, monkeypatch):
