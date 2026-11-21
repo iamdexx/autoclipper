@@ -432,10 +432,18 @@ def _same_fact(a: str, b: str) -> bool:
 
 
 _ASKS = {"how", "why", "what", "who", "when", "where", "which", "does", "did", "can", "you"}
+_FILLER = set(
+    "has have had are was were really actually truly work works worked explained one two three"
+    " four five six seven eight nine ten eleven twelve thirteen twenty hundred thousand".split()
+)
 
 
 def _story_words(s: str) -> set[str]:
-    return {w for w in _keywords(s) if w not in _ASKS and _number(w) is None and not w.isdigit()}
+    return {
+        w
+        for w in _keywords(s)
+        if w not in _ASKS and w not in _FILLER and _number(w) is None and not w.isdigit()
+    }
 
 
 def _initials(s: str) -> set[str]:
