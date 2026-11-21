@@ -352,11 +352,16 @@ def _call_openai(prompt: str, model: str | None) -> str:
 
 
 def _parse_json_array(text: str) -> list[dict]:
-    text = text.strip()
-    m = re.search(r"\[.*\]", text, re.S)
-    if not m:
-        raise ValueError("no JSON array in LLM output")
-    return json.loads(m.group(0))
+    """The first JSON array of objects in an answer, ignoring any prose or brackets around it."""
+    dec = json.JSONDecoder()
+    for m in re.finditer(r"\[", text):
+        try:
+            j, _ = dec.raw_decode(text, m.start())
+        except ValueError:
+            continue
+        if isinstance(j, list) and all(isinstance(x, dict) for x in j):
+            return j
+    raise ValueError("no JSON array in LLM output")
 
 
 # a trailing "..." is a speaker breaking off, not the end of a sentence
