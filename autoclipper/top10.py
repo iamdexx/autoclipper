@@ -451,10 +451,8 @@ def same_story(a: str, b: str) -> bool:
     """Two video titles that ask the same question: "Why Grand Theft Auto VI Took 12 Years" and
     "Why GTA 6 Took 13 Years" (a name or its initials, the figures aside). Most of one title's
     words are in the other."""
-    if " ".join(re.findall(r"[a-z0-9]+", a.lower())) == " ".join(
-        re.findall(r"[a-z0-9]+", b.lower())
-    ):
-        return bool(a.strip())
+    if " ".join(a.lower().split()).strip(" ?!.") == " ".join(b.lower().split()).strip(" ?!."):
+        return bool(a.strip(" ?!."))
     x, y = _story_words(a), _story_words(b)
     if not x or not y:
         return False

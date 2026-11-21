@@ -555,6 +555,7 @@ def test_a_story_already_made_is_not_told_again(tmp_path, monkeypatch):
     assert top10.same_story("Why GTA 6 Was Suddenly Delayed", "Why GTA 6 Was Unexpectedly Delayed")
     assert top10.same_story("How VR Works", "How VR Works")
     assert not top10.same_story("", "")
+    assert not top10.same_story("What Is C++?", "What Is C#?")
     cfg = _cfg(tmp_path)
     cfg.top10.style = "explainer"
     _no_net(monkeypatch)
