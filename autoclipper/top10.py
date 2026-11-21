@@ -439,11 +439,7 @@ _FILLER = set(
 
 
 def _story_words(s: str) -> set[str]:
-    return {
-        w
-        for w in _keywords(s)
-        if w not in _ASKS and w not in _FILLER and _number(w) is None and not w.isdigit()
-    }
+    return {w for w in _keywords(s) if w not in _ASKS and _number(w) is None and not w.isdigit()}
 
 
 def _initials(s: str) -> set[str]:
@@ -455,10 +451,14 @@ def same_story(a: str, b: str) -> bool:
     """Two video titles that ask the same question: "Why Grand Theft Auto VI Took 12 Years" and
     "Why GTA 6 Took 13 Years" (a name or its initials, the figures aside). Most of one title's
     words are in the other."""
+    if " ".join(re.findall(r"[a-z0-9]+", a.lower())) == " ".join(
+        re.findall(r"[a-z0-9]+", b.lower())
+    ):
+        return bool(a.strip())
     x, y = _story_words(a), _story_words(b)
     if not x or not y:
         return False
-    if x == y:
+    if x == y or (x - _FILLER and x - _FILLER == y - _FILLER):
         return True
     xs, ys = x | (_initials(a) & y), y | (_initials(b) & x)
     cover = max(len(x & ys) / len(x), len(y & xs) / len(y))

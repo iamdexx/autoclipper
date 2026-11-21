@@ -551,6 +551,10 @@ def test_a_story_already_made_is_not_told_again(tmp_path, monkeypatch):
     assert not top10.same_story("Why We Sleep", "Why Sleep Helps Memory")
     assert top10.same_story("Why GTA 6 Has Three Endings", "How GTA 6 Endings Actually Work")
     assert not top10.same_story("How GTA 6 Police Work", "How GTA 6 Banks Work")
+    assert not top10.same_story("How GTA 6 Police Work", "Where GTA 6 Police Stations Are")
+    assert top10.same_story("Why GTA 6 Was Suddenly Delayed", "Why GTA 6 Was Unexpectedly Delayed")
+    assert top10.same_story("How VR Works", "How VR Works")
+    assert not top10.same_story("", "")
     cfg = _cfg(tmp_path)
     cfg.top10.style = "explainer"
     _no_net(monkeypatch)
