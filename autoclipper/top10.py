@@ -432,6 +432,10 @@ def _same_fact(a: str, b: str) -> bool:
 
 
 _ASKS = {"how", "why", "what", "who", "when", "where", "which", "does", "did", "can", "you"}
+_FILLER = set(
+    "has have had are was were really actually truly work works worked explained one two three"
+    " four five six seven eight nine ten eleven twelve thirteen twenty hundred thousand".split()
+)
 
 
 def _story_words(s: str) -> set[str]:
@@ -447,10 +451,12 @@ def same_story(a: str, b: str) -> bool:
     """Two video titles that ask the same question: "Why Grand Theft Auto VI Took 12 Years" and
     "Why GTA 6 Took 13 Years" (a name or its initials, the figures aside). Most of one title's
     words are in the other."""
+    if " ".join(a.lower().split()).strip(" ?!.") == " ".join(b.lower().split()).strip(" ?!."):
+        return bool(a.strip(" ?!."))
     x, y = _story_words(a), _story_words(b)
     if not x or not y:
         return False
-    if x == y:
+    if x == y or (x - _FILLER and x - _FILLER == y - _FILLER):
         return True
     xs, ys = x | (_initials(a) & y), y | (_initials(b) & x)
     cover = max(len(x & ys) / len(x), len(y & xs) / len(y))
