@@ -292,6 +292,24 @@ def test_footage_must_match_entry():
     assert not top10.footage_matches(e, "Best Hurdles in Football History")
 
 
+def test_footage_of_a_mod_or_another_sequel_is_not_the_game():
+    e = top10.Entry(0, "", "", "Grand Theft Auto VI gameplay no commentary")
+    mod = "GTA 6 PS5 Graphics!? Heist & Police Chase Action Gameplay! Ray Tracing / GTA V Mod"
+    assert not top10.footage_matches(e, mod)
+    assert not top10.footage_matches(e, "GTA 6 Graphics Mod Gameplay No Commentary")
+    assert not top10.footage_matches(e, "GTA 6 vs GTA 5 Gameplay Comparison")
+    assert not top10.footage_matches(e, "Grand Theft Auto VI fan made concept gameplay")
+    assert not top10.footage_matches(e, "GTA 6 Gameplay (GTAV Remastered) No Commentary")
+    assert top10.footage_matches(e, "GTA 6 Gameplay Walkthrough Part 5 FULL GAME - No Commentary")
+    assert top10.footage_matches(e, "Grand Theft Auto VI Gameplay 4K60 No Commentary")
+    assert top10.footage_matches(e, "GTA 6 - Stealing a Jet From the Military Base")
+    m = top10.Entry(0, "Best mods", "", "Minecraft mods gameplay")
+    assert top10.footage_matches(m, "Top Minecraft Mods Gameplay")
+    top = top10.Entry(0, "", "", "Top 5 Fortnite Chapter 6 gameplay")
+    assert top10.footage_matches(top, "Top 10 Fortnite Chapter 6 Gameplay Moments")
+    assert not top10.footage_matches(top, "Top 5 Fortnite Chapter 5 Gameplay")
+
+
 def test_footage_matches_a_game_titled_by_its_initials():
     e = top10.Entry(0, "", "", "Grand Theft Auto VI gameplay no commentary")
     assert top10.footage_matches(e, "GTA 6 Gameplay Walkthrough Part 1 FULL GAME - No Commentary")

@@ -463,9 +463,16 @@ def same_story(a: str, b: str) -> bool:
     return len(xs & ys) >= 2 and cover >= 0.75
 
 
+_MOD = re.compile(r"\b(mods?|modded|fan[- ]?made|concept)\b", re.I)
+
+
 def footage_matches(entry: Entry, title: str) -> bool:
     """The search result must actually be about the entry: the video title has to share the
-    proper-noun-ish keywords of the entry name (or most of the query)."""
+    proper-noun-ish keywords of the entry name (or most of the query). A mod, fan-made concept
+    or another sequel of the same game ("GTA 6 Graphics!? ... / GTA V Mod") is not the game."""
+    asked = f"{entry.name} {entry.query}"
+    if _MOD.search(title) and not _MOD.search(asked) or _other_sequel(asked, title):
+        return False
     t = _keywords(title)
     name = _keywords(entry.name)
     if name and len(name & t) >= max(1, len(name) // 2):
@@ -510,6 +517,36 @@ def _acronym_hits(query: str, title: str) -> set[str]:
             if ok:
                 hits |= _keywords(" ".join(words[i:j]))
     return hits
+
+
+def _other_sequel(query: str, title: str) -> bool:
+    """The title names another number of a game the query asks for by number: "Grand Theft
+    Auto VI" asked, "GTA V" or "Grand Theft Auto 5" said."""
+    words = re.findall(r"[a-z0-9]+", query.lower())
+    said = re.findall(r"[a-z0-9]+", title.lower())
+    for i in range(len(words)):
+        for j in range(i + 2, min(len(words), i + 5)):
+            n = _number(words[j])
+            name = words[i:j]
+            if n is None or any(_number(w) is not None for w in name):
+                continue
+            short = "".join(w[0] for w in name) if len(name) >= 3 else None
+            for k in range(len(said)):
+                if said[k : k + len(name)] == name:
+                    nxt = k + len(name)
+                elif said[k] == short:
+                    nxt = k + 1
+                elif short and said[k].startswith(short):
+                    m = _number(said[k][len(short) :])
+                    if m is not None and m != n:
+                        return True
+                    continue
+                else:
+                    continue
+                m = _number(said[nxt]) if nxt < len(said) else None
+                if m is not None and m != n:
+                    return True
+    return False
 
 
 def has_video(path: Path) -> bool:
