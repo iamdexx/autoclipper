@@ -114,7 +114,7 @@ class PostMeta:
 
 def _tag(h: str) -> str:
     """Accents fold to their letter (Tomás -> #Tomas), not dropped (#Toms)."""
-    h = unicodedata.normalize("NFKD", str(h))
+    h = unicodedata.normalize("NFD", str(h))
     h = "#" + re.sub(r"[^0-9A-Za-z_]", "", h)
     return h if len(h) > 1 else ""
 
