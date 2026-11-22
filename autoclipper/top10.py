@@ -519,10 +519,10 @@ def _acronym_hits(query: str, title: str) -> set[str]:
     return hits
 
 
-# words a number follows that are not a game's name: "Top 5", "Part 6", "Chapter 6"
+# words a number follows that are not a game's name: "Top 5", "Part 6", "Game 7"
 _COUNTS = set(
     "top best worst part chapter episode ep season day week level mission act vol volume round"
-    " no number rank".split()
+    " no number rank game games match race stage lap year".split()
 )
 
 
