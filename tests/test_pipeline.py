@@ -1464,6 +1464,12 @@ def test_nothing_posts_until_it_passes_the_review(tmp_path, monkeypatch):
     assert asked.count("later.mp4") == 4 and asked.index("later.mp4") > asked.index("slop.mp4")
 
 
+def test_a_stream_chat_column_counts_as_an_overlay():
+    from autoclipper import review
+
+    assert "chat column" in review.SOURCE_PROMPT and "chat column" in review.VIDEO_PROMPT
+
+
 def test_review_verdict_needs_a_clean_checklist_and_a_high_score(tmp_path, monkeypatch):
     from autoclipper import ingest, review
 
