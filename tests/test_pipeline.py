@@ -2138,3 +2138,12 @@ def test_explainer_shows_a_game_over_its_gameplay_not_its_trailer():
         "for a game its name\n              plus 'gameplay no commentary' (never a trailer" in game
     )
     assert "for a film or show its name plus 'official trailer'" in game
+
+
+def test_hashtags_fold_accents_instead_of_dropping_letters():
+    assert metadata.clean_tags(["Tomás", "#Lucía", "#Pokémon_GO"]) == [
+        "#Tomas",
+        "#Lucia",
+        "#Pokemon_GO",
+        "#shorts",
+    ]

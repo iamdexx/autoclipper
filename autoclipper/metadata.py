@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
 from . import top10, trends
@@ -112,7 +113,9 @@ class PostMeta:
 
 
 def _tag(h: str) -> str:
-    h = "#" + re.sub(r"[^0-9A-Za-z_]", "", str(h))
+    """Accents fold to their letter (Tomás -> #Tomas), not dropped (#Toms)."""
+    h = unicodedata.normalize("NFKD", str(h))
+    h = "#" + re.sub(r"[^0-9A-Za-z_]", "", h)
     return h if len(h) > 1 else ""
 
 
