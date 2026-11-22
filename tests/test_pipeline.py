@@ -1464,6 +1464,44 @@ def test_nothing_posts_until_it_passes_the_review(tmp_path, monkeypatch):
     assert asked.count("later.mp4") == 4 and asked.index("later.mp4") > asked.index("slop.mp4")
 
 
+def test_a_clip_failing_for_overlays_takes_its_siblings_from_the_same_source(tmp_path, monkeypatch):
+    from autoclipper import review
+
+    cfg = _cfg(tmp_path)
+    cfg.review.enabled = True
+    for name, src, score in (("a1", "vidA", 9.0), ("a2", "vidA", 8.0), ("a0", "vidA", 10.0)):
+        f = tmp_path / f"{name}.mp4"
+        f.write_bytes(b"x")
+        queue.enqueue(f, "clip", src, score, metadata.PostMeta(f"GTA 6 {name}", "d", []), cfg)
+    for name in ("b1", "b2"):
+        f = tmp_path / f"{name}.mp4"
+        f.write_bytes(b"x")
+        queue.enqueue(f, "clip", "vidB", 5.0, metadata.PostMeta(f"GTA 6 {name}", "d", []), cfg)
+    verdicts = {
+        "a0.mp4": review.Verdict(True, 8),  # passed before its sibling showed the chat column
+        "a1.mp4": review.Verdict(False, 3, ["foreign_overlays"]),
+        "a2.mp4": review.Verdict(True, 8),
+        "b1.mp4": review.Verdict(False, 4, ["cut_off"]),
+        "b2.mp4": review.Verdict(True, 8),
+    }
+    asked = []
+
+    def fake(path, kind, c):
+        asked.append(path.name)
+        return verdicts[path.name]
+
+    monkeypatch.setattr(review, "video", fake)
+    queue.review_pending(cfg)
+    assert [it.video for it in queue.items(cfg)] == ["b2.mp4"]
+    assert "a2.mp4" not in asked
+
+
+def test_a_stream_chat_column_counts_as_an_overlay():
+    from autoclipper import review
+
+    assert "chat column" in review.SOURCE_PROMPT and "chat column" in review.VIDEO_PROMPT
+
+
 def test_review_verdict_needs_a_clean_checklist_and_a_high_score(tmp_path, monkeypatch):
     from autoclipper import ingest, review
 

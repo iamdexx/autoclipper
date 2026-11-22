@@ -195,12 +195,18 @@ def prune(cfg: Config) -> list[Item]:
 def review_pending(cfg: Config) -> None:
     """The editor's pass (review.py) on queued videos that have not had it, best first: a pass is
     recorded, a fail is deleted, and one whose review could not be run waits for the next run
-    (at most review.max_attempts of them). Covers videos queued before the pass existed too."""
+    (at most review.max_attempts of them). Covers videos queued before the pass existed too.
+    Overlays are in the source's picture, so one clip failing for them drops its siblings too."""
     if not cfg.review.enabled:
         return
     down = 0
+    overlaid: set[str] = set()
     for it in items(cfg):
         if it.reviewed:
+            continue
+        if it.source in overlaid:
+            log.info("queue: dropping %s (its source has foreign overlays)", it.video)
+            remove(cfg, it)
             continue
         v = review.video(_dir(cfg) / it.id / it.video, it.kind, cfg)
         if v.ok is None:  # one timeout is not an outage: ask once more
@@ -227,6 +233,12 @@ def review_pending(cfg: Config) -> None:
                 v.score,
                 ", ".join(v.problems) or v.note,
             )
+            remove(cfg, it)
+            if it.kind == "clip" and "foreign_overlays" in v.problems:
+                overlaid.add(it.source)
+    for it in items(cfg):
+        if it.source in overlaid:
+            log.info("queue: dropping %s (its source has foreign overlays)", it.video)
             remove(cfg, it)
 
 
