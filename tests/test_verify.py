@@ -308,6 +308,10 @@ def test_footage_of_a_mod_or_another_sequel_is_not_the_game():
     top = top10.Entry(0, "", "", "Top 5 Fortnite Chapter 6 gameplay")
     assert top10.footage_matches(top, "Top 10 Fortnite Chapter 6 Gameplay Moments")
     assert not top10.footage_matches(top, "Top 5 Fortnite Chapter 5 Gameplay")
+    g = top10.Entry(0, "", "", "GTA 6 gameplay no commentary")
+    assert not top10.footage_matches(g, "GTA 5 Gameplay Walkthrough (No Commentary)")
+    assert not top10.footage_matches(g, "GTA V Gameplay No Commentary 4K")
+    assert top10.footage_matches(g, "GTA 6 Gameplay Walkthrough Part 5 - No Commentary")
 
 
 def test_footage_matches_a_game_titled_by_its_initials():

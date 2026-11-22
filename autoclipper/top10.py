@@ -519,16 +519,23 @@ def _acronym_hits(query: str, title: str) -> set[str]:
     return hits
 
 
+# words a number follows that are not a game's name: "Top 5", "Part 6", "Chapter 6"
+_COUNTS = set(
+    "top best worst part chapter episode ep season day week level mission act vol volume round"
+    " no number rank".split()
+)
+
+
 def _other_sequel(query: str, title: str) -> bool:
     """The title names another number of a game the query asks for by number: "Grand Theft
     Auto VI" asked, "GTA V" or "Grand Theft Auto 5" said."""
     words = re.findall(r"[a-z0-9]+", query.lower())
     said = re.findall(r"[a-z0-9]+", title.lower())
     for i in range(len(words)):
-        for j in range(i + 2, min(len(words), i + 5)):
+        for j in range(i + 1, min(len(words), i + 5)):
             n = _number(words[j])
             name = words[i:j]
-            if n is None or any(_number(w) is not None for w in name):
+            if n is None or any(_number(w) is not None for w in name) or name[0] in _COUNTS:
                 continue
             short = "".join(w[0] for w in name) if len(name) >= 3 else None
             for k in range(len(said)):
