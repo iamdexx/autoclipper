@@ -81,23 +81,30 @@ def _window(hits: list[tuple[float, float, bool]], window: float) -> tuple[float
     """(centre, faces held) of the crop `window` wide that holds the most whole faces (left,
     right edge 0..1, frontal?), frontal ones breaking ties: the median of two speakers on
     opposite sides would be a window between them showing neither, and a brief cutaway must not
-    push the speaker's face half out. The centre is the held faces' median, moved just enough
-    to keep them all."""
+    push the speaker's face half out."""
     boxes = []
     for left, right, frontal in hits:
-        # a close-up as wide as the crop: its middle half, so samples of it moving still overlap
+        # grouped by a close-up's middle half, so samples of it moving still overlap
         c, half = (left + right) / 2, min(right - left, window / 2) / 2
-        boxes.append((c - half, c + half, frontal))
+        boxes.append((c - half, c + half, frontal, left, right))
     boxes.sort()
-    best: list[tuple[float, float, bool]] = []
-    for i, (start, _, _) in enumerate(boxes):
+    best: list[tuple[float, float, bool, float, float]] = []
+    for i, (start, *_) in enumerate(boxes):
         group = [b for b in boxes[i:] if b[1] <= start + window + 1e-9]
         if (len(group), sum(b[2] for b in group)) > (len(best), sum(b[2] for b in best)):
             best = group
     if not best:
         return None, 0
-    cx = median((b[0] + b[1]) / 2 for b in best)
-    cx = min(max(cx, max(b[1] for b in best) - window / 2), best[0][0] + window / 2)
+    mid = median((b[0] + b[1]) / 2 for b in best)
+
+    def holds(c: float, lo: int, hi: int) -> int:
+        return sum(c - window / 2 - 1e-9 <= b[lo] and b[hi] <= c + window / 2 + 1e-9 for b in best)
+
+    # the centre keeping the most whole faces in frame, then the most middles, then nearest the
+    # median: a brief cutaway must not pull the crop off the speaker
+    centres = [mid, max(b[1] for b in best) - window / 2, best[0][0] + window / 2]
+    centres += [e for b in best for e in (b[4] - window / 2, b[3] + window / 2)]
+    cx = max(centres, key=lambda c: (holds(c, 3, 4), holds(c, 0, 1), -abs(c - mid)))
     return cx, len(best)
 
 
