@@ -1842,6 +1842,18 @@ def test_tool_report_counts_each_models_calls_and_config_sets_the_order(tmp_path
     assert rep["a"] == {"ok": 2, "failed": 0, "why": {}}
     tools.reset()
 
+    # a model that answers 200 with no text is counted as an empty answer, not "other"
+    class E(R):
+        def json(self):
+            return {"choices": [{"message": {"content": None}}]}
+
+    monkeypatch.setattr(
+        rank, "_nvidia_post", lambda m, c, timeout=240: E(200) if m == "b" else R(200)
+    )
+    assert rank._call_nvidia("hi", None) == "hello"
+    assert tools.report()["b"] == {"ok": 0, "failed": 1, "why": {"empty": 1}}
+    tools.reset()
+
     # Gemini: a timeout and a blocked answer (200 with no candidates) are failures too
     import requests
 
