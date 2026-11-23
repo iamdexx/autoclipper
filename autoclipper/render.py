@@ -180,8 +180,9 @@ def _vf(
     focus: float | None = None,
 ) -> str:
     """Vertical reframe. `mode` crop: the picture is scaled to fill the 9:16 frame and cropped
-    around `focus` (0..1 horizontal centre, default the middle); blur: the full picture sits in
-    the middle over a blurred, zoomed copy of itself.
+    around `focus` (0..1 horizontal centre, default the middle); middle: the middle SHOT_ASPECT
+    of the picture across the full width, over a blurred copy of itself (as explainer footage
+    is shown); blur: the full picture sits in the middle over a blurred, zoomed copy of itself.
     `punch_at`: times (s) where the picture snaps in ~10% and settles back - a cut accent."""
     punch = ""
     if punch_at:
@@ -200,10 +201,13 @@ def _vf(
             f"{src}scale={W}:{H}:force_original_aspect_ratio=increase,"
             f"crop={W}:{H}:{x}:(ih-{H})/2,{punch}ass={ass_path.as_posix()}[v]"
         )
+    # a 16:9 picture across a 9:16 frame is a strip a third of its height; its middle 4:5
+    # fills most of the screen
+    fg = f"crop='min(iw,ih*{SHOT_ASPECT})':ih," if mode == "middle" else ""
     return (
         f"{src}split=2[bg][fg];"
         f"[bg]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=20:5[bgb];"
-        f"[fg]scale={W}:-2:force_original_aspect_ratio=decrease[fgs];"
+        f"[fg]{fg}scale={W}:-2:force_original_aspect_ratio=decrease[fgs];"
         f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2,{punch}"
         f"ass={ass_path.as_posix()}[v]"
     )
@@ -211,13 +215,13 @@ def _vf(
 
 def _frame(cfg: Config, source: Path, start: float, dur: float) -> dict:
     """_vf keyword arguments for this clip: the configured mode and, when cropping, where the
-    speaker is in the footage. A crop with no speaker found becomes "blur"."""
+    speaker is in the footage. A crop with no speaker found becomes "middle"."""
     mode = cfg.look.reframe
     focus = reframe.focus_x(source, start, dur) if mode == "crop" else None
     if mode == "crop" and focus is None:
-        # nobody found to crop to (a speaker in profile, gameplay): the middle of the frame may
-        # cut them off, so the whole picture is shown over a blurred copy instead
-        mode = "blur"
+        # nobody found to crop to (gameplay, a wide shot): a full-height crop of the middle would
+        # cut too much off the sides, the whole picture would be a thin strip
+        mode = "middle"
     return {"mode": mode, "focus": focus}
 
 

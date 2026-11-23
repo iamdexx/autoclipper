@@ -109,6 +109,9 @@ def test_reframe_crops_to_the_face_or_the_middle_and_brands_every_video(tmp_path
     assert "iw*0.5000" in render._vf(ass, mode="crop", focus=None)
     assert "iw*1.0000" in render._vf(ass, mode="crop", focus=1.7)
     assert "boxblur" in render._vf(ass, mode="blur")
+    assert "crop='min(iw,ih*0.8)':ih" not in render._vf(ass, mode="blur")
+    # middle: the middle 4:5 fills the width instead of a 16:9 strip a third of the height
+    assert "[fg]crop='min(iw,ih*0.8)':ih,scale=1080:-2" in render._vf(ass, mode="middle")
     # no face in a test pattern -> centre crop, and the handle sits on every frame
     src = _src(tmp_path)
     assert reframe.focus_x(src, 0.0, 6.0) is None
@@ -2122,15 +2125,59 @@ def test_a_moment_opens_and_closes_on_whole_sentences(tmp_path):
     assert rank._on_sentences(0, 10, trailing, cfg) is None  # breaking off is not an ending
 
 
-def test_a_clip_with_no_face_to_crop_to_shows_the_whole_picture(tmp_path, monkeypatch):
+def test_a_clip_with_no_face_to_crop_to_shows_the_middle_of_the_picture(tmp_path, monkeypatch):
+    # run 45074104538 posted gameranx gameplay as a 1080x608 strip in a 1920-high frame
     from autoclipper import reframe
 
     cfg = _cfg(tmp_path)
     cfg.look.reframe = "crop"
-    monkeypatch.setattr(reframe, "focus_x", lambda *a: None)  # a speaker in profile, gameplay
-    assert render._frame(cfg, tmp_path / "v.mp4", 0.0, 6.0) == {"mode": "blur", "focus": None}
+    monkeypatch.setattr(reframe, "focus_x", lambda *a: None)  # gameplay, a wide shot
+    assert render._frame(cfg, tmp_path / "v.mp4", 0.0, 6.0) == {"mode": "middle", "focus": None}
     monkeypatch.setattr(reframe, "focus_x", lambda *a: 0.8)
     assert render._frame(cfg, tmp_path / "v.mp4", 0.0, 6.0) == {"mode": "crop", "focus": 0.8}
+    src = _src(tmp_path)
+    cfg.look.reframe = "crop"
+    out = render.render_clip(
+        src, Moment(0.0, 6.0, "H", "r", 1.0), _segments(4), cfg, tmp_path / "m.mp4"
+    )
+    assert out.exists()
+
+
+def test_a_speaker_in_profile_is_found_to_crop_to(tmp_path, monkeypatch):
+    # PR 60: a speaker in profile at the right of the picture was not seen by the frontal cascade
+    import cv2
+
+    from autoclipper import reframe
+
+    calls = []
+
+    class Casc:
+        def __init__(self, path):
+            self.side = "profile" in path
+
+        def detectMultiScale(self, img, *a, **k):
+            calls.append(self.side)
+            if not self.side:
+                return []
+            # the profile cascade sees faces turned one way: only in the mirrored frame here
+            return [(40, 100, 80, 80)] if img[0, 0] == 255 else []
+
+    def imread(path):
+        import numpy as np
+
+        img = np.zeros((360, 640, 3), dtype=np.uint8)
+        img[0, -1] = 255  # marks the original frame's right edge: the mirror has it at [0, 0]
+        return img
+
+    monkeypatch.setattr(cv2, "CascadeClassifier", Casc)
+    monkeypatch.setattr(cv2, "imread", imread)
+    src = _src(tmp_path)
+    cx = reframe.focus_x(src, 0.0, 6.0)
+    assert cx is not None and abs(cx - (640 - 80) / 640) < 1e-6  # right of the picture
+    # the person-on-camera check of a source still counts frontal faces only
+    calls.clear()
+    assert reframe.face_share(src, 6.0, samples=4) == 0.0
+    assert calls and not any(calls)
 
 
 def test_explainer_shows_a_game_over_its_gameplay_not_its_trailer():
