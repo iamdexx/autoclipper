@@ -2180,6 +2180,41 @@ def test_a_speaker_in_profile_is_found_to_crop_to(tmp_path, monkeypatch):
     assert calls and not any(calls)
 
 
+def test_two_speakers_on_opposite_sides_keep_the_crop_on_one(tmp_path, monkeypatch):
+    # Devin Review on PR 72: frontal hits at x=0.2 and profile-only hits at x=0.8 have a median of
+    # 0.5, a window showing neither; the crop stays on the frontal speaker
+    import cv2
+    import numpy as np
+
+    from autoclipper import reframe
+
+    frames = iter(range(100))
+
+    class Casc:
+        def __init__(self, path):
+            self.side = "profile" in path
+
+        def detectMultiScale(self, img, *a, **k):
+            even = img[0, 0] == 255
+            if self.side:
+                if even or img[0, 0] == 128:  # the mirrored frame shows no face
+                    return []
+                return [(472, 100, 80, 80)]  # centre 0.8
+            return [(88, 100, 80, 80)] if even else []  # centre 0.2
+
+    def imread(path):
+        img = np.zeros((360, 640, 3), dtype=np.uint8)
+        if next(frames) % 2 == 0:
+            img[0, 0] = 255
+        return img
+
+    monkeypatch.setattr(cv2, "CascadeClassifier", Casc)
+    monkeypatch.setattr(cv2, "imread", imread)
+    monkeypatch.setattr(cv2, "flip", lambda img, axis: np.full_like(img, 128))
+    cx = reframe.focus_x(_src(tmp_path), 0.0, 6.0)
+    assert cx is not None and abs(cx - 0.2) < 1e-6
+
+
 def test_explainer_shows_a_game_over_its_gameplay_not_its_trailer():
     # trailer uploads of GTA 6 passed 20 of 71 frame checks over four runs and made no video;
     # gameplay passed 15 of 16 and was posted

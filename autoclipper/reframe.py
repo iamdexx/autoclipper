@@ -19,18 +19,20 @@ MIN_HITS = 0.3  # share of sampled frames that must show a face to trust it
 
 def _faces(
     source: Path, start: float, dur: float, n: int, profile: bool = False
-) -> tuple[list[float], int] | None:
-    """(x centre 0..1 of the biggest face in each sampled frame that shows one, frames read), or
-    None without OpenCV. `profile`: a frame with no frontal face is also searched for a face
-    turned to either side."""
+) -> tuple[list[tuple[float, bool]], int, float] | None:
+    """((x centre 0..1, frontal?) of the biggest face in each sampled frame that shows one,
+    frames read, the share of the frame's width a full-height 9:16 crop keeps), or None without
+    OpenCV. `profile`: a frame with no frontal face is also searched for a face turned to
+    either side."""
     try:
         import cv2
     except ImportError:  # pragma: no cover - optional dependency
         return None
     casc = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
     side = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
-    xs: list[float] = []
+    hits: list[tuple[float, bool]] = []
     read = 0
+    window = 1.0
     with tempfile.TemporaryDirectory() as td:
         for i in range(n):
             t = start + dur * (i + 0.5) / n
@@ -47,8 +49,10 @@ def _faces(
                 continue
             read += 1
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            width = img.shape[1]
+            height, width = img.shape[:2]
+            window = min(1.0, height * 9 / 16 / width)
             found = [tuple(r) for r in casc.detectMultiScale(gray, 1.1, 5, minSize=(28, 28))]
+            frontal = bool(found)
             if not found and profile:
                 found = [tuple(r) for r in side.detectMultiScale(gray, 1.1, 5, minSize=(28, 28))]
                 # the cascade only knows faces turned one way: the mirrored frame finds the other
@@ -57,8 +61,8 @@ def _faces(
             if not found:
                 continue
             x, _, w, _ = max(found, key=lambda r: r[2] * r[3])  # the biggest face leads
-            xs.append((x + w / 2) / width)
-    return xs, read
+            hits.append(((x + w / 2) / width, frontal))
+    return hits, read, window
 
 
 def face_share(source: Path, dur: float, samples: int = 40) -> float | None:
@@ -81,10 +85,18 @@ def focus_x(source: Path, start: float, dur: float) -> float | None:
     if found is None:
         log.info("reframe: opencv not installed, no face to crop to")
         return None
-    xs = found[0]
-    if len(xs) < max(1, round(n * MIN_HITS)):
-        log.info("reframe: face in %d/%d frames, no face to crop to", len(xs), n)
+    hits, _, window = found
+
+    def near(c: float) -> list[tuple[float, bool]]:
+        return [h for h in hits if abs(h[0] - c) <= window / 2]
+
+    # the faces one crop window can hold, most of them, frontal ones first: the median of two
+    # speakers on opposite sides would be a window between them showing neither
+    best = max((near(c) for c, _ in hits), key=lambda g: (len(g), sum(f for _, f in g)), default=[])
+    if len(best) < max(1, round(n * MIN_HITS)):
+        log.info("reframe: face in %d/%d frames, no face to crop to", len(best), n)
         return None
+    xs = [x for x, _ in best]
     cx = median(xs)
     log.info("reframe: face at x=%.2f (%d/%d frames)", cx, len(xs), n)
     return cx
