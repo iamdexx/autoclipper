@@ -496,6 +496,14 @@ def test_footage_window_is_each_storys_own(tmp_path, monkeypatch):
     assert all(3600 <= s <= 32400 for s in starts[1:])  # never the intro or the credits
     top10.fetch_footage(entry, 240, tmp_path / "3", cfg, max_s=40000, seed=seed)
     assert windows[-1] == windows[2]  # one story keeps its window across runs
+    # a short upload: the stories still get different windows that fit whole
+    cands[0] = trends.Candidate("s", "GTA 6 gameplay no commentary", "Fan", 300, 9)
+    windows.clear()
+    for i, seed in enumerate(["Why GTA 6 Limits Your Guns", "Why GTA 6 Avoided 2020s Slang"]):
+        entry = top10.Entry(0, "", "", "GTA 6 gameplay no commentary")
+        top10.fetch_footage(entry, 240, tmp_path / f"s{i}", cfg, max_s=40000, seed=seed)
+    spans = [[float(x) for x in w.lstrip("*").split("-")] for w in windows]
+    assert spans[0] != spans[1] and all(30 <= a and b <= 299 for a, b in spans)
 
 
 def test_top10_footage_skips_blocked_channels_and_excluded_titles(tmp_path, monkeypatch):

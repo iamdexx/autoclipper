@@ -627,11 +627,15 @@ def fetch_footage(
         tall = {c.id: _tallest(c.url, fmt) for c in cands}
         cands.sort(key=lambda c: -tall[c.id])
         log.info("footage for %r: %s", entry.query, [f"{c.id} {tall[c.id]}p" for c in cands])
-    at = 0.2  # skip the first ~20% (intros) and pull a window from there
-    if seed:  # the most-viewed upload is found for every story: each one shows its own minutes
-        at = 0.1 + 0.8 * int(hashlib.sha1(seed.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
+    # the most-viewed upload is found for every story: each one shows its own minutes of it
+    at = int(hashlib.sha1(seed.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF if seed else None
     for c in cands:
-        start = max(0.0, min(c.duration * at, c.duration - secs - 1))
+        last = c.duration - secs - 1
+        if at is None:  # skip the first ~20% (intros) and pull a window from there
+            start = max(0.0, min(c.duration * 0.2, last))
+        else:  # anywhere a whole window fits between the first and last ~10%
+            lo, hi = c.duration * 0.1, min(c.duration * 0.9, last)
+            start = max(0.0, lo + at * (hi - lo) if hi > lo else last)
         cmd = ingest.ytdlp(
             "--no-playlist",
             "-f",
@@ -699,7 +703,7 @@ def footage_shots(script: Script, n: int, cfg: Config, dest: Path) -> list[Shot]
             max_s=12 * 3600,
             skip=frozenset(tried),
             height=2160,
-            seed=script.title,
+            seed=script.topic or script.title,  # a rewritten title keeps its footage
         )
         if clip is None:
             log.warning("no more footage found for %r", script.footage)

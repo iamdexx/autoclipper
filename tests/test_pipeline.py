@@ -1913,6 +1913,9 @@ def test_story_footage_is_moving_stretches_checked_start_middle_and_end(tmp_path
     monkeypatch.setattr(top10, "fetch_footage", fetch)
     assert asked["query"] == s.footage and asked["max_s"] > cfg.top10.source_max_duration_s
     assert asked["height"] > 1080  # the middle of a wide frame has to fill a tall screen
+    assert asked["seed"] == s.topic  # the story, not its title: a rewritten title keeps it
+    s.topic = ""
+    top10.footage_shots(s, 1, cfg, tmp_path / "untitled")
     assert asked["seed"] == s.title
     seg = render.render_shot(clip, 10.0, 2.0, None, [], cfg, tmp_path / "seg.mp4", title="T")
     assert abs(narrate.duration(seg) - 2.0) < 0.2
