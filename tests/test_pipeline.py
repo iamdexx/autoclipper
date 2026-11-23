@@ -2180,6 +2180,23 @@ def test_a_speaker_in_profile_is_found_to_crop_to(tmp_path, monkeypatch):
     assert calls and not any(calls)
 
 
+def test_the_crop_window_holds_the_most_faces_it_can():
+    from autoclipper import reframe
+
+    w = 0.316  # a 9:16 crop of a 16:9 picture
+    # a speaker moving across most of a window: detections at 0.22 and 0.47 fit one crop
+    cx, held = reframe._window([(0.22, True)] * 2 + [(0.47, True)] * 2, w)
+    assert held == 4 and 0.47 - w / 2 <= cx <= 0.22 + w / 2
+    # faces bunched at one side of the window: the centre still keeps every face it counted
+    hits = [(0.66, True)] * 4 + [(0.44, True)] * 2 + [(0.40, True)] + [(0.20, True)] * 3
+    cx, held = reframe._window(hits, w)
+    assert held == 7 and 0.66 - w / 2 <= cx <= 0.40 + w / 2 + 1e-9  # the median 0.66 would not
+    # a tie goes to the window with more frontal faces
+    cx, held = reframe._window([(0.2, True), (0.2, False), (0.8, False), (0.8, False)], w)
+    assert cx == 0.2 and held == 2
+    assert reframe._window([], w) == (None, 0)
+
+
 def test_two_speakers_on_opposite_sides_keep_the_crop_on_one(tmp_path, monkeypatch):
     # Devin Review on PR 72: frontal hits at x=0.2 and profile-only hits at x=0.8 have a median of
     # 0.5, a window showing neither; the crop stays on the frontal speaker
