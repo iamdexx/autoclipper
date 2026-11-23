@@ -85,7 +85,8 @@ def _window(hits: list[tuple[float, float, bool]], window: float) -> tuple[float
     to keep them all."""
     boxes = []
     for left, right, frontal in hits:
-        c, half = (left + right) / 2, min(right - left, window) / 2  # a face wider than the crop
+        # a close-up as wide as the crop: its middle half, so samples of it moving still overlap
+        c, half = (left + right) / 2, min(right - left, window / 2) / 2
         boxes.append((c - half, c + half, frontal))
     boxes.sort()
     best: list[tuple[float, float, bool]] = []

@@ -2205,6 +2205,10 @@ def test_the_crop_window_holds_the_most_faces_it_can():
     assert held == 9 and abs(cx - 416 / 640) < 1e-9
     # a face wider than the crop still counts, centred
     assert reframe._window([at(0.5, width=0.5)] * 3, w) == (0.5, 3)
+    # a close-up about as wide as the crop moving a few pixels is one face, not ten
+    closeup = [(x / 640, (x + 210) / 640, True) for x in range(411, 421)]
+    cx, held = reframe._window(closeup, 360 * 9 / 16 / 640)
+    assert held == 10 and 516 / 640 <= cx <= 525 / 640
 
 
 def test_two_speakers_on_opposite_sides_keep_the_crop_on_one(tmp_path, monkeypatch):
