@@ -1,5 +1,6 @@
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -406,7 +407,7 @@ def test_footage_cache_is_per_entry(tmp_path, monkeypatch):
     old = top10.Entry(1, "old play", "l", "q")
     assert top10.fetch_footage(old, 5, tmp_path, cfg) is None
     cached = tmp_path / "01-old-play-cafe1234.mp4"
-    key = hashlib.sha1(b"old play|q").hexdigest()[:8]
+    key = hashlib.sha1(b"old play|q|").hexdigest()[:8]
     cached = cached.with_name(f"01-old-play-{key}.mp4")
     cached.write_bytes(b"x")
     assert top10.fetch_footage(old, 5, tmp_path, cfg) is None  # not a playable video: purged
@@ -469,6 +470,32 @@ def test_take_is_only_spoken_when_supported(tmp_path, monkeypatch):
     verdict.update(v="supported", adds=True)
     assert run("e.json").take == take
     assert [r.get("kind") for r in json.loads((tmp_path / "e.json").read_text())] == ["take"]
+
+
+def test_footage_window_is_each_storys_own(tmp_path, monkeypatch):
+    """The most-viewed walkthrough is found for every story about a game: two stories must not
+    show the same minutes of it."""
+    cfg = _cfg(tmp_path)
+    cands = [trends.Candidate("w", "GTA 6 gameplay no commentary", "Fan", 36000, 9)]
+    monkeypatch.setattr(trends, "yt_search", lambda q, n, **k: cands)
+    monkeypatch.setattr(top10, "footage_matches", lambda e, t: True)
+    windows = []
+
+    def download(cmd, **k):
+        windows.append(cmd[cmd.index("--download-sections") + 1])
+        return subprocess.CompletedProcess(cmd, 1, "", "no")
+
+    monkeypatch.setattr(top10.subprocess, "run", download)
+    for i, seed in enumerate(["", "Why GTA 6 Limits Your Guns", "Why GTA 6 Avoided 2020s Slang"]):
+        entry = top10.Entry(0, "", "", "GTA 6 gameplay no commentary")
+        assert (
+            top10.fetch_footage(entry, 240, tmp_path / str(i), cfg, max_s=40000, seed=seed) is None
+        )
+    starts = [float(w.lstrip("*").split("-")[0]) for w in windows]
+    assert starts[0] == 7200 and len(set(starts)) == 3
+    assert all(3600 <= s <= 32400 for s in starts[1:])  # never the intro or the credits
+    top10.fetch_footage(entry, 240, tmp_path / "3", cfg, max_s=40000, seed=seed)
+    assert windows[-1] == windows[2]  # one story keeps its window across runs
 
 
 def test_top10_footage_skips_blocked_channels_and_excluded_titles(tmp_path, monkeypatch):

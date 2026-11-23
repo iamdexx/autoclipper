@@ -1888,8 +1888,8 @@ def test_story_footage_is_moving_stretches_checked_start_middle_and_end(tmp_path
     clip = _synthetic(tmp_path, "clip.mp4", 32)
     asked = {}
 
-    def fetch(entry, secs, dest, cfg, max_s=0, skip=frozenset(), height=720):
-        asked.update(query=entry.query, max_s=max_s, height=height)
+    def fetch(entry, secs, dest, cfg, max_s=0, skip=frozenset(), height=720, seed=""):
+        asked.update(query=entry.query, max_s=max_s, height=height, seed=seed)
         asked.setdefault("skips", []).append(skip)
         entry.video_id = f"v{entry.rank}"
         return clip
@@ -1913,6 +1913,7 @@ def test_story_footage_is_moving_stretches_checked_start_middle_and_end(tmp_path
     monkeypatch.setattr(top10, "fetch_footage", fetch)
     assert asked["query"] == s.footage and asked["max_s"] > cfg.top10.source_max_duration_s
     assert asked["height"] > 1080  # the middle of a wide frame has to fill a tall screen
+    assert asked["seed"] == s.title
     seg = render.render_shot(clip, 10.0, 2.0, None, [], cfg, tmp_path / "seg.mp4", title="T")
     assert abs(narrate.duration(seg) - 2.0) < 0.2
     # footage that runs out holds its last frame for the rest of the line

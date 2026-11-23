@@ -588,11 +588,13 @@ def fetch_footage(
     max_s: float = 0,
     skip: frozenset[str] = frozenset(),
     height: int = 720,
+    seed: str = "",
 ) -> Path | None:
     """Download only a `secs`-long window from the best-matching video (yt-dlp sections).
     `max_s`: the longest video to take it from (default: top10.source_max_duration_s).
-    `skip`: ids of videos not to take it from. `height`: the tallest picture to take."""
-    key = hashlib.sha1(f"{entry.name}|{entry.query}".encode()).hexdigest()[:8]
+    `skip`: ids of videos not to take it from. `height`: the tallest picture to take.
+    `seed`: whose window it is; each seed gets its own stretch of the video."""
+    key = hashlib.sha1(f"{entry.name}|{entry.query}|{seed}".encode()).hexdigest()[:8]
     out = dest / f"{entry.rank:02d}-{_slug(entry.name)[:30]}-{key}.mp4"
     source = out.with_suffix(".id")  # which video a kept clip came from
     if out.exists():
@@ -625,9 +627,11 @@ def fetch_footage(
         tall = {c.id: _tallest(c.url, fmt) for c in cands}
         cands.sort(key=lambda c: -tall[c.id])
         log.info("footage for %r: %s", entry.query, [f"{c.id} {tall[c.id]}p" for c in cands])
+    at = 0.2  # skip the first ~20% (intros) and pull a window from there
+    if seed:  # the most-viewed upload is found for every story: each one shows its own minutes
+        at = 0.1 + 0.8 * int(hashlib.sha1(seed.encode()).hexdigest()[:8], 16) / 0xFFFFFFFF
     for c in cands:
-        # skip the first ~20% (intros) and pull a window from there
-        start = max(0.0, min(c.duration * 0.2, c.duration - secs - 1))
+        start = max(0.0, min(c.duration * at, c.duration - secs - 1))
         cmd = ingest.ytdlp(
             "--no-playlist",
             "-f",
@@ -688,7 +692,14 @@ def footage_shots(script: Script, n: int, cfg: Config, dest: Path) -> list[Shot]
         # at the tallest picture there is: the middle of a wide frame has to fill a tall screen
         src = Entry(k, "", "", script.footage)
         clip = fetch_footage(
-            src, 240, dest, cfg, max_s=12 * 3600, skip=frozenset(tried), height=2160
+            src,
+            240,
+            dest,
+            cfg,
+            max_s=12 * 3600,
+            skip=frozenset(tried),
+            height=2160,
+            seed=script.title,
         )
         if clip is None:
             log.warning("no more footage found for %r", script.footage)
