@@ -2184,17 +2184,27 @@ def test_the_crop_window_holds_the_most_faces_it_can():
     from autoclipper import reframe
 
     w = 0.316  # a 9:16 crop of a 16:9 picture
+
+    def at(x, frontal=True, width=0.0):
+        return (x - width / 2, x + width / 2, frontal)
+
     # a speaker moving across most of a window: detections at 0.22 and 0.47 fit one crop
-    cx, held = reframe._window([(0.22, True)] * 2 + [(0.47, True)] * 2, w)
+    cx, held = reframe._window([at(0.22)] * 2 + [at(0.47)] * 2, w)
     assert held == 4 and 0.47 - w / 2 <= cx <= 0.22 + w / 2
     # faces bunched at one side of the window: the centre still keeps every face it counted
-    hits = [(0.66, True)] * 4 + [(0.44, True)] * 2 + [(0.40, True)] + [(0.20, True)] * 3
+    hits = [at(0.66)] * 4 + [at(0.44)] * 2 + [at(0.40)] + [at(0.20)] * 3
     cx, held = reframe._window(hits, w)
     assert held == 7 and 0.66 - w / 2 <= cx <= 0.40 + w / 2 + 1e-9  # the median 0.66 would not
     # a tie goes to the window with more frontal faces
-    cx, held = reframe._window([(0.2, True), (0.2, False), (0.8, False), (0.8, False)], w)
+    cx, held = reframe._window([at(0.2), at(0.2, False), at(0.8, False), at(0.8, False)], w)
     assert cx == 0.2 and held == 2
     assert reframe._window([], w) == (None, 0)
+    # a brief cutaway a crop width away does not push the speaker's whole face out of frame
+    speaker, cutaway = at(416 / 640, width=40 / 640), at(215 / 640, width=40 / 640)
+    cx, held = reframe._window([speaker] * 9 + [cutaway], 360 * 9 / 16 / 640)
+    assert held == 9 and abs(cx - 416 / 640) < 1e-9
+    # a face wider than the crop still counts, centred
+    assert reframe._window([at(0.5, width=0.5)] * 3, w) == (0.5, 3)
 
 
 def test_two_speakers_on_opposite_sides_keep_the_crop_on_one(tmp_path, monkeypatch):

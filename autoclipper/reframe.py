@@ -20,7 +20,7 @@ MIN_HITS = 0.3  # share of sampled frames that must show a face to trust it
 def _faces(
     source: Path, start: float, dur: float, n: int, profile: bool = False
 ) -> tuple[list[tuple[float, bool]], int, float] | None:
-    """((x centre 0..1, frontal?) of the biggest face in each sampled frame that shows one,
+    """((left, right edge 0..1, frontal?) of the biggest face in each sampled frame that shows one,
     frames read, the share of the frame's width a full-height 9:16 crop keeps), or None without
     OpenCV. `profile`: a frame with no frontal face is also searched for a face turned to
     either side."""
@@ -30,7 +30,7 @@ def _faces(
         return None
     casc = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
     side = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
-    hits: list[tuple[float, bool]] = []
+    hits: list[tuple[float, float, bool]] = []
     read = 0
     window = 1.0
     with tempfile.TemporaryDirectory() as td:
@@ -61,7 +61,7 @@ def _faces(
             if not found:
                 continue
             x, _, w, _ = max(found, key=lambda r: r[2] * r[3])  # the biggest face leads
-            hits.append(((x + w / 2) / width, frontal))
+            hits.append((x / width, (x + w) / width, frontal))
     return hits, read, window
 
 
@@ -77,20 +77,26 @@ def face_share(source: Path, dur: float, samples: int = 40) -> float | None:
     return len(found[0]) / found[1]
 
 
-def _window(hits: list[tuple[float, bool]], window: float) -> tuple[float | None, int]:
-    """(centre, faces held) of the crop `window` wide that holds the most face hits, frontal ones
-    breaking ties: the median of two speakers on opposite sides would be a window between them
-    showing neither. The centre is the held faces' median, moved just enough to keep them all."""
-    xs = sorted(hits)
-    best: list[tuple[float, bool]] = []
-    for i, (left, _) in enumerate(xs):
-        group = [h for h in xs[i:] if h[0] <= left + window]
-        if (len(group), sum(f for _, f in group)) > (len(best), sum(f for _, f in best)):
+def _window(hits: list[tuple[float, float, bool]], window: float) -> tuple[float | None, int]:
+    """(centre, faces held) of the crop `window` wide that holds the most whole faces (left,
+    right edge 0..1, frontal?), frontal ones breaking ties: the median of two speakers on
+    opposite sides would be a window between them showing neither, and a brief cutaway must not
+    push the speaker's face half out. The centre is the held faces' median, moved just enough
+    to keep them all."""
+    boxes = []
+    for left, right, frontal in hits:
+        c, half = (left + right) / 2, min(right - left, window) / 2  # a face wider than the crop
+        boxes.append((c - half, c + half, frontal))
+    boxes.sort()
+    best: list[tuple[float, float, bool]] = []
+    for i, (start, _, _) in enumerate(boxes):
+        group = [b for b in boxes[i:] if b[1] <= start + window + 1e-9]
+        if (len(group), sum(b[2] for b in group)) > (len(best), sum(b[2] for b in best)):
             best = group
     if not best:
         return None, 0
-    held = [x for x, _ in best]
-    cx = min(max(median(held), held[-1] - window / 2), held[0] + window / 2)
+    cx = median((b[0] + b[1]) / 2 for b in best)
+    cx = min(max(cx, max(b[1] for b in best) - window / 2), best[0][0] + window / 2)
     return cx, len(best)
 
 
