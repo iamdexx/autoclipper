@@ -2223,6 +2223,11 @@ def test_the_crop_window_holds_the_most_faces_it_can():
         [(300 / 640, 500 / 640, True)] * 2 + [(250 / 640, 290 / 640, True)], w2 * 2
     )
     assert held == 2 and abs(cx - 400 / 640) < 1e-9
+    # a speaker the crop can hold whole outranks close-ups too wide to fit one crop together
+    left = [((x - 100) / 640, (x + 100) / 640, True) for x in (111, 125, 140, 155)]
+    right = [(485 / 640, 565 / 640, True)] * 3
+    cx, held = reframe._window(left + right, w2 * 2)
+    assert held == 3 and abs(cx - 525 / 640) < 1e-9
 
 
 def test_two_speakers_on_opposite_sides_keep_the_crop_on_one(tmp_path, monkeypatch):

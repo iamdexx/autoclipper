@@ -81,35 +81,31 @@ def _window(hits: list[tuple[float, float, bool]], window: float) -> tuple[float
     """(centre, faces in frame) of the crop `window` wide that holds the most faces (left,
     right edge 0..1, frontal?), frontal ones breaking ties: the median of two speakers on
     opposite sides would be a window between them showing neither, and a brief cutaway must not
-    push the speaker's face half out."""
+    push the speaker's face half out. The centre is the held faces' median, moved just enough
+    to keep them all."""
     boxes = []
     for left, right, frontal in hits:
-        # grouped by a close-up's middle half, so samples of it moving still overlap
-        c, half = (left + right) / 2, min(right - left, window / 2) / 2
-        # what must be in frame: the whole face, or the middle of one wider than the crop
-        whole = right - left <= window + 1e-9
-        boxes.append(
-            (c - half, c + half, frontal, *((left, right) if whole else (c - half, c + half)))
-        )
-    boxes.sort()
-    best: list[tuple[float, float, bool, float, float]] = []
-    for i, (start, *_) in enumerate(boxes):
-        group = [b for b in boxes[i:] if b[1] <= start + window + 1e-9]
-        if (len(group), sum(b[2] for b in group)) > (len(best), sum(b[2] for b in best)):
-            best = group
+        # a close-up wider than the crop: its middle half must be in, so samples of it moving
+        # still fit one crop together
+        if right - left > window:
+            c = (left + right) / 2
+            left, right = c - window / 4, c + window / 4
+        boxes.append((left, right, frontal))
+
+    def held(c: float) -> list[tuple[float, float, bool]]:
+        return [b for b in boxes if c - window / 2 - 1e-9 <= b[0] and b[1] <= c + window / 2 + 1e-9]
+
+    # every crop holding the most faces can slide until a face sits at one of its edges
+    edges = [e for lo, hi, _ in boxes for e in (lo + window / 2, hi - window / 2)]
+    best = max((held(c) for c in edges), key=lambda g: (len(g), sum(b[2] for b in g)), default=[])
     if not best:
         return None, 0
-    mid = median((b[0] + b[1]) / 2 for b in best)
-
-    def holds(c: float) -> int:
-        return sum(c - window / 2 - 1e-9 <= b[3] and b[4] <= c + window / 2 + 1e-9 for b in best)
-
-    # the centre keeping the most faces in frame, then nearest the median: a brief cutaway must
-    # not pull the crop off the speaker; only the faces kept count
-    centres = [mid, max(b[1] for b in best) - window / 2, best[0][0] + window / 2]
-    centres += [e for b in best for e in (b[4] - window / 2, b[3] + window / 2)]
-    cx = max(centres, key=lambda c: (holds(c), -abs(c - mid)))
-    return cx, holds(cx)
+    cx = median((lo + hi) / 2 for lo, hi, _ in best)
+    cx = min(
+        max(cx, max(hi for _, hi, _ in best) - window / 2),
+        min(lo for lo, _, _ in best) + window / 2,
+    )
+    return cx, len(best)
 
 
 def focus_x(source: Path, start: float, dur: float) -> float | None:
