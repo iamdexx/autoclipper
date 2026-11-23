@@ -20,7 +20,14 @@ def record(tool: str, ok: bool, why: str = "") -> None:
         return
     c["failed"] += 1
     m = re.search(r"\b([45]\d\d)\b", why)
-    key = m.group(1) if m else ("timeout" if "timed out" in why.lower() else "other")
+    if m:
+        key = m.group(1)
+    elif "timed out" in why.lower():
+        key = "timeout"
+    elif "empty" in why.lower():
+        key = "empty"
+    else:
+        key = "other"
     c["why"][key] = c["why"].get(key, 0) + 1
 
 
