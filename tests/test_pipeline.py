@@ -109,6 +109,9 @@ def test_reframe_crops_to_the_face_or_the_middle_and_brands_every_video(tmp_path
     assert "iw*0.5000" in render._vf(ass, mode="crop", focus=None)
     assert "iw*1.0000" in render._vf(ass, mode="crop", focus=1.7)
     assert "boxblur" in render._vf(ass, mode="blur")
+    assert "crop='min(iw,ih*0.8)':ih" not in render._vf(ass, mode="blur")
+    # middle: the middle 4:5 fills the width instead of a 16:9 strip a third of the height
+    assert "[fg]crop='min(iw,ih*0.8)':ih,scale=1080:-2" in render._vf(ass, mode="middle")
     # no face in a test pattern -> centre crop, and the handle sits on every frame
     src = _src(tmp_path)
     assert reframe.focus_x(src, 0.0, 6.0) is None
@@ -2122,15 +2125,144 @@ def test_a_moment_opens_and_closes_on_whole_sentences(tmp_path):
     assert rank._on_sentences(0, 10, trailing, cfg) is None  # breaking off is not an ending
 
 
-def test_a_clip_with_no_face_to_crop_to_shows_the_whole_picture(tmp_path, monkeypatch):
+def test_a_clip_with_no_face_to_crop_to_shows_the_middle_of_the_picture(tmp_path, monkeypatch):
+    # run 45074104538 posted gameranx gameplay as a 1080x608 strip in a 1920-high frame
     from autoclipper import reframe
 
     cfg = _cfg(tmp_path)
     cfg.look.reframe = "crop"
-    monkeypatch.setattr(reframe, "focus_x", lambda *a: None)  # a speaker in profile, gameplay
-    assert render._frame(cfg, tmp_path / "v.mp4", 0.0, 6.0) == {"mode": "blur", "focus": None}
+    monkeypatch.setattr(reframe, "focus_x", lambda *a: None)  # gameplay, a wide shot
+    assert render._frame(cfg, tmp_path / "v.mp4", 0.0, 6.0) == {"mode": "middle", "focus": None}
     monkeypatch.setattr(reframe, "focus_x", lambda *a: 0.8)
     assert render._frame(cfg, tmp_path / "v.mp4", 0.0, 6.0) == {"mode": "crop", "focus": 0.8}
+    src = _src(tmp_path)
+    cfg.look.reframe = "crop"
+    out = render.render_clip(
+        src, Moment(0.0, 6.0, "H", "r", 1.0), _segments(4), cfg, tmp_path / "m.mp4"
+    )
+    assert out.exists()
+
+
+def test_a_speaker_in_profile_is_found_to_crop_to(tmp_path, monkeypatch):
+    # PR 60: a speaker in profile at the right of the picture was not seen by the frontal cascade
+    import cv2
+
+    from autoclipper import reframe
+
+    calls = []
+
+    class Casc:
+        def __init__(self, path):
+            self.side = "profile" in path
+
+        def detectMultiScale(self, img, *a, **k):
+            calls.append(self.side)
+            if not self.side:
+                return []
+            # the profile cascade sees faces turned one way: only in the mirrored frame here
+            return [(40, 100, 80, 80)] if img[0, 0] == 255 else []
+
+    def imread(path):
+        import numpy as np
+
+        img = np.zeros((360, 640, 3), dtype=np.uint8)
+        img[0, -1] = 255  # marks the original frame's right edge: the mirror has it at [0, 0]
+        return img
+
+    monkeypatch.setattr(cv2, "CascadeClassifier", Casc)
+    monkeypatch.setattr(cv2, "imread", imread)
+    src = _src(tmp_path)
+    cx = reframe.focus_x(src, 0.0, 6.0)
+    assert cx is not None and abs(cx - (640 - 80) / 640) < 1e-6  # right of the picture
+    # the person-on-camera check of a source still counts frontal faces only
+    calls.clear()
+    assert reframe.face_share(src, 6.0, samples=4) == 0.0
+    assert calls and not any(calls)
+
+
+def test_the_crop_window_holds_the_most_faces_it_can():
+    from autoclipper import reframe
+
+    w = 0.316  # a 9:16 crop of a 16:9 picture
+
+    def at(x, frontal=True, width=0.0):
+        return (x - width / 2, x + width / 2, frontal)
+
+    # a speaker moving across most of a window: detections at 0.22 and 0.47 fit one crop
+    cx, held = reframe._window([at(0.22)] * 2 + [at(0.47)] * 2, w)
+    assert held == 4 and 0.47 - w / 2 <= cx <= 0.22 + w / 2
+    # faces bunched at one side of the window: the centre still keeps every face it counted
+    hits = [at(0.66)] * 4 + [at(0.44)] * 2 + [at(0.40)] + [at(0.20)] * 3
+    cx, held = reframe._window(hits, w)
+    assert held == 7 and 0.66 - w / 2 <= cx <= 0.40 + w / 2 + 1e-9  # the median 0.66 would not
+    # a tie goes to the window with more frontal faces
+    cx, held = reframe._window([at(0.2), at(0.2, False), at(0.8, False), at(0.8, False)], w)
+    assert cx == 0.2 and held == 2
+    assert reframe._window([], w) == (None, 0)
+    # a brief cutaway a crop width away does not push the speaker's whole face out of frame
+    speaker, cutaway = at(416 / 640, width=40 / 640), at(215 / 640, width=40 / 640)
+    cx, held = reframe._window([speaker] * 9 + [cutaway], 360 * 9 / 16 / 640)
+    assert held == 9 and abs(cx - 416 / 640) < 1e-9
+    # a face wider than the crop still counts, centred
+    assert reframe._window([at(0.5, width=0.5)] * 3, w) == (0.5, 3)
+    # a close-up about as wide as the crop moving a few pixels is one face, not ten
+    closeup = [(x / 640, (x + 210) / 640, True) for x in range(411, 421)]
+    cx, held = reframe._window(closeup, 360 * 9 / 16 / 640)
+    assert held == 10 and 516 / 640 <= cx <= 525 / 640
+    # a brief close-up cutaway beside a speaker's close-up: the speaker's whole face stays in
+    speaker, cutaway = (316 / 640, 516 / 640, True), (216 / 640, 416 / 640, True)
+    cx, held = reframe._window([speaker] * 9 + [cutaway], 360 * 9 / 16 / 640)
+    w2 = 360 * 9 / 16 / 640 / 2
+    assert held == 9 and 516 / 640 - w2 - 1e-9 <= cx <= 316 / 640 + w2 + 1e-9
+    # a speaker's close-up wider than the crop outvotes a cutaway the crop could hold whole
+    speaker, cutaway = (295 / 640, 505 / 640, True), (200 / 640, 400 / 640, True)
+    cx, held = reframe._window([speaker] * 9 + [cutaway], 360 * 9 / 16 / 640)
+    assert held == 9 and abs(cx - 400 / 640) < 1e-9
+    # a face the chosen crop leaves out does not count towards trusting it
+    cx, held = reframe._window(
+        [(300 / 640, 500 / 640, True)] * 2 + [(250 / 640, 290 / 640, True)], w2 * 2
+    )
+    assert held == 2 and abs(cx - 400 / 640) < 1e-9
+    # a speaker the crop can hold whole outranks close-ups too wide to fit one crop together
+    left = [((x - 100) / 640, (x + 100) / 640, True) for x in (111, 125, 140, 155)]
+    right = [(485 / 640, 565 / 640, True)] * 3
+    cx, held = reframe._window(left + right, w2 * 2)
+    assert held == 3 and abs(cx - 525 / 640) < 1e-9
+
+
+def test_two_speakers_on_opposite_sides_keep_the_crop_on_one(tmp_path, monkeypatch):
+    # Devin Review on PR 72: frontal hits at x=0.2 and profile-only hits at x=0.8 have a median of
+    # 0.5, a window showing neither; the crop stays on the frontal speaker
+    import cv2
+    import numpy as np
+
+    from autoclipper import reframe
+
+    frames = iter(range(100))
+
+    class Casc:
+        def __init__(self, path):
+            self.side = "profile" in path
+
+        def detectMultiScale(self, img, *a, **k):
+            even = img[0, 0] == 255
+            if self.side:
+                if even or img[0, 0] == 128:  # the mirrored frame shows no face
+                    return []
+                return [(472, 100, 80, 80)]  # centre 0.8
+            return [(88, 100, 80, 80)] if even else []  # centre 0.2
+
+    def imread(path):
+        img = np.zeros((360, 640, 3), dtype=np.uint8)
+        if next(frames) % 2 == 0:
+            img[0, 0] = 255
+        return img
+
+    monkeypatch.setattr(cv2, "CascadeClassifier", Casc)
+    monkeypatch.setattr(cv2, "imread", imread)
+    monkeypatch.setattr(cv2, "flip", lambda img, axis: np.full_like(img, 128))
+    cx = reframe.focus_x(_src(tmp_path), 0.0, 6.0)
+    assert cx is not None and abs(cx - 0.2) < 1e-6
 
 
 def test_explainer_shows_a_game_over_its_gameplay_not_its_trailer():
