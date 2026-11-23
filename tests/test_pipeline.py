@@ -2213,7 +2213,16 @@ def test_the_crop_window_holds_the_most_faces_it_can():
     speaker, cutaway = (316 / 640, 516 / 640, True), (216 / 640, 416 / 640, True)
     cx, held = reframe._window([speaker] * 9 + [cutaway], 360 * 9 / 16 / 640)
     w2 = 360 * 9 / 16 / 640 / 2
-    assert held == 10 and 516 / 640 - w2 - 1e-9 <= cx <= 316 / 640 + w2 + 1e-9
+    assert held == 9 and 516 / 640 - w2 - 1e-9 <= cx <= 316 / 640 + w2 + 1e-9
+    # a speaker's close-up wider than the crop outvotes a cutaway the crop could hold whole
+    speaker, cutaway = (295 / 640, 505 / 640, True), (200 / 640, 400 / 640, True)
+    cx, held = reframe._window([speaker] * 9 + [cutaway], 360 * 9 / 16 / 640)
+    assert held == 9 and abs(cx - 400 / 640) < 1e-9
+    # a face the chosen crop leaves out does not count towards trusting it
+    cx, held = reframe._window(
+        [(300 / 640, 500 / 640, True)] * 2 + [(250 / 640, 290 / 640, True)], w2 * 2
+    )
+    assert held == 2 and abs(cx - 400 / 640) < 1e-9
 
 
 def test_two_speakers_on_opposite_sides_keep_the_crop_on_one(tmp_path, monkeypatch):
