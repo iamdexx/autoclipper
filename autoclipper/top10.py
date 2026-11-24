@@ -8,7 +8,9 @@ import functools
 import hashlib
 import json
 import logging
+import os
 import re
+import signal
 import subprocess
 import time
 from collections.abc import Sequence
@@ -580,6 +582,26 @@ def _tallest(url: str, fmt: str) -> int:
         return 0
 
 
+def _download(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
+    """Run a download; one that runs past `timeout` is stopped with the FFmpeg it started (yt-dlp
+    cuts sections with a child FFmpeg that would otherwise keep writing to the same file)."""
+    with subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True
+    ) as p:
+        try:
+            out, err = p.communicate(timeout=timeout)
+        except BaseException as e:  # a timeout, or the run itself being stopped (Ctrl-C)
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            p.communicate()
+            if not isinstance(e, subprocess.TimeoutExpired):
+                raise
+            return subprocess.CompletedProcess(cmd, 1, "", f"timed out after {timeout:.0f}s")
+    return subprocess.CompletedProcess(cmd, p.returncode, out, err)
+
+
 def fetch_footage(
     entry: Entry,
     secs: float,
@@ -650,7 +672,7 @@ def fetch_footage(
             str(out),
             c.url,
         )
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        r = _download(cmd, timeout=600)
         if r.returncode == 0 and out.exists() and has_video(out):
             entry.video_id = c.id
             source.write_text(c.id)

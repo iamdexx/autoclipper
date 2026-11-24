@@ -1,6 +1,8 @@
 import hashlib
 import json
+import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -485,7 +487,7 @@ def test_footage_window_is_each_storys_own(tmp_path, monkeypatch):
         windows.append(cmd[cmd.index("--download-sections") + 1])
         return subprocess.CompletedProcess(cmd, 1, "", "no")
 
-    monkeypatch.setattr(top10.subprocess, "run", download)
+    monkeypatch.setattr(top10, "_download", download)
     for i, seed in enumerate(["", "Why GTA 6 Limits Your Guns", "Why GTA 6 Avoided 2020s Slang"]):
         entry = top10.Entry(0, "", "", "GTA 6 gameplay no commentary")
         assert (
@@ -506,6 +508,79 @@ def test_footage_window_is_each_storys_own(tmp_path, monkeypatch):
     assert spans[0] != spans[1] and all(30 <= a and b <= 299 for a, b in spans)
 
 
+def test_footage_download_timeout_tries_the_next_upload(tmp_path, monkeypatch):
+    """A window that does not download in time is one slow upload, not a failed video."""
+    cfg = _cfg(tmp_path)
+    cands = [
+        trends.Candidate("slow", "GTA 6 gameplay no commentary", "Fan", 600, 9),
+        trends.Candidate("fast", "GTA 6 gameplay no commentary", "Fan", 600, 8),
+    ]
+    monkeypatch.setattr(trends, "yt_search", lambda q, n, **k: cands)
+    monkeypatch.setattr(top10, "footage_matches", lambda e, t: True)
+    monkeypatch.setattr(top10, "has_video", lambda p: True)
+
+    def download(cmd, **k):
+        out = Path(cmd[cmd.index("-o") + 1])
+        if cmd[-1].endswith("slow"):
+            out.with_suffix(".mp4.part").write_text("x")
+            return subprocess.CompletedProcess(cmd, 1, "", "timed out after 600s")
+        out.write_text("x")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(top10, "_download", download)
+    entry = top10.Entry(0, "", "", "GTA 6 gameplay no commentary")
+    got = top10.fetch_footage(entry, 60, tmp_path, cfg)
+    assert got is not None and got.exists() and entry.video_id == "fast"
+    assert not list(tmp_path.glob("*.part"))
+
+
+def test_download_timeout_stops_the_ffmpeg_it_started(tmp_path):
+    """yt-dlp cuts a section with a child FFmpeg: a timed-out download must stop that too, or it
+    keeps writing to the file the next upload is downloaded into."""
+    pid = tmp_path / "child.pid"
+    cmd = ["sh", "-c", f"sleep 60 & echo $! > {pid}; wait"]
+    r = top10._download(cmd, timeout=1)
+    assert r.returncode == 1 and "timed out" in r.stderr
+    child = int(pid.read_text())
+    for _ in range(50):
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError("the downloader's child is still running")
+    assert top10._download(["sh", "-c", "echo ok"], timeout=5).stdout == "ok\n"
+
+
+def test_stopped_run_stops_the_download_too(tmp_path, monkeypatch):
+    """Ctrl-C during a download stops its whole process group and is not taken as one failed
+    upload (which would start the next)."""
+    pid = tmp_path / "child.pid"
+    cmd = ["sh", "-c", f"sleep 60 & echo $! > {pid}; wait"]
+    real = subprocess.Popen.communicate
+
+    def interrupted(self, *a, **k):
+        if k.get("timeout"):
+            while not pid.exists() or not pid.read_text().strip():
+                time.sleep(0.05)
+            raise KeyboardInterrupt
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(subprocess.Popen, "communicate", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        top10._download(cmd, timeout=30)
+    child = int(pid.read_text())
+    for _ in range(50):
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError("the downloader's child is still running")
+
+
 def test_top10_footage_skips_blocked_channels_and_excluded_titles(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
     cfg.trends.blocked_channels = ["Rockstar Games"]
@@ -520,7 +595,7 @@ def test_top10_footage_skips_blocked_channels_and_excluded_titles(tmp_path, monk
     def no_download(*a, **k):
         raise AssertionError("prohibited footage was downloaded")
 
-    monkeypatch.setattr(top10.subprocess, "run", no_download)
+    monkeypatch.setattr(top10, "_download", no_download)
     assert top10.fetch_footage(top10.Entry(1, "map reveal", "l", "q"), 5, tmp_path, cfg) is None
 
 
