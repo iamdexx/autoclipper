@@ -590,12 +590,14 @@ def _download(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
     ) as p:
         try:
             out, err = p.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
+        except BaseException as e:  # a timeout, or the run itself being stopped (Ctrl-C)
             try:
                 os.killpg(p.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
             p.communicate()
+            if not isinstance(e, subprocess.TimeoutExpired):
+                raise
             return subprocess.CompletedProcess(cmd, 1, "", f"timed out after {timeout:.0f}s")
     return subprocess.CompletedProcess(cmd, p.returncode, out, err)
 

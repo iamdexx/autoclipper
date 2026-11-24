@@ -553,6 +553,34 @@ def test_download_timeout_stops_the_ffmpeg_it_started(tmp_path):
     assert top10._download(["sh", "-c", "echo ok"], timeout=5).stdout == "ok\n"
 
 
+def test_stopped_run_stops_the_download_too(tmp_path, monkeypatch):
+    """Ctrl-C during a download stops its whole process group and is not taken as one failed
+    upload (which would start the next)."""
+    pid = tmp_path / "child.pid"
+    cmd = ["sh", "-c", f"sleep 60 & echo $! > {pid}; wait"]
+    real = subprocess.Popen.communicate
+
+    def interrupted(self, *a, **k):
+        if k.get("timeout"):
+            while not pid.exists() or not pid.read_text().strip():
+                time.sleep(0.05)
+            raise KeyboardInterrupt
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(subprocess.Popen, "communicate", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        top10._download(cmd, timeout=30)
+    child = int(pid.read_text())
+    for _ in range(50):
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError("the downloader's child is still running")
+
+
 def test_top10_footage_skips_blocked_channels_and_excluded_titles(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
     cfg.trends.blocked_channels = ["Rockstar Games"]
