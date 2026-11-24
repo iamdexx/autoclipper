@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 FEED_DEPTH = 8  # newest uploads looked at per creator per run
 
 
-_cookie_tmp: dict[int, Path] = {}
+_cookie_tmp: dict[int, tuple[object, Path]] = {}
 _cookie_lock = threading.Lock()
 
 
@@ -31,23 +31,29 @@ def _cookies_file() -> str | None:
     a logged-in browser's cookies get past it. YT_COOKIES_FILE = path to a Netscape cookies.txt,
     or YT_COOKIES = its contents (the form a repo secret takes). yt-dlp rewrites its cookies file
     when it exits, so calls running at once (the trend searches) would read each other's
-    half-written file: each thread gets its own private copy, gone with the process."""
+    half-written file: each thread gets its own private copy, gone with the process, and made
+    afresh when YT_COOKIES_FILE is replaced."""
+    path = os.environ.get("YT_COOKIES_FILE")
+    if path and Path(path).is_file():
+        source: object = (path, Path(path).stat().st_mtime_ns)
+    else:
+        path = None
+        source = os.environ.get("YT_COOKIES", "")
     tid = threading.get_ident()
     with _cookie_lock:
-        tmp = _cookie_tmp.get(tid)
-        if tmp is not None and tmp.exists():
+        seen, tmp = _cookie_tmp.get(tid, (None, None))
+        if tmp is not None and seen == source and tmp.exists():
             return str(tmp)
-        path = os.environ.get("YT_COOKIES_FILE")
-        if path and Path(path).is_file():
-            blob = Path(path).read_text().strip()
-        else:
-            blob = os.environ.get("YT_COOKIES", "").strip()
-        if not blob:
+        blob = Path(path).read_text() if path else str(source)
+        if not blob.strip():
             return None
         fd, name = tempfile.mkstemp(suffix=".txt", prefix="yt-cookies-")
         with os.fdopen(fd, "w") as f:  # mkstemp => 0600, owner only
-            f.write(blob + "\n")
-        tmp = _cookie_tmp[tid] = Path(name)
+            f.write(blob.strip("\r\n") + "\n")  # an empty last value keeps its tab
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+        tmp = Path(name)
+        _cookie_tmp[tid] = (source, tmp)
         atexit.register(lambda p=tmp: p.unlink(missing_ok=True))
         return str(tmp)
 

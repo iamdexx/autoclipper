@@ -848,7 +848,14 @@ def test_ytdlp_gets_cookies_and_proxy_from_the_environment(tmp_path, monkeypatch
     cmd = ingest.ytdlp()
     assert cmd[1] == "--cookies" and cmd[2] != str(f)  # yt-dlp never rewrites the user's file
     assert Path(cmd[2]).read_text() == "x\n"
-    Path(cmd[2]).unlink()
+    assert ingest.ytdlp()[2] == cmd[2]  # reused while the file is unchanged
+
+    f.write_text(".youtube.com\tTRUE\t/\tTRUE\t0\tA\t\n")  # replaced; last value empty
+    os.utime(f, ns=(1, 1))
+    fresh = ingest.ytdlp()[2]
+    assert fresh != cmd[2] and not Path(cmd[2]).exists()  # a long `watch` sees new cookies
+    assert Path(fresh).read_text() == ".youtube.com\tTRUE\t/\tTRUE\t0\tA\t\n"
+    Path(fresh).unlink()
 
 
 def test_ytdlp_calls_running_at_once_never_share_a_cookies_file(monkeypatch):
