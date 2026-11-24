@@ -832,8 +832,8 @@ def test_ytdlp_gets_cookies_and_proxy_from_the_environment(tmp_path, monkeypatch
     assert ingest.ytdlp("-J", "u") == ["yt-dlp", "-J", "u"]
 
     monkeypatch.setenv(
-        "YT_COOKIES", "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tA\tb"
-    )
+        "YT_COOKIES", "  # Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tA\tb"
+    )  # pasted with indentation
     monkeypatch.setenv("YT_PROXY", "http://u:p@host:8080")
     cmd = ingest.ytdlp("-J", "u")
     assert cmd[:1] + cmd[3:] == ["yt-dlp", "--proxy", "http://u:p@host:8080", "-J", "u"]
@@ -845,7 +845,43 @@ def test_ytdlp_gets_cookies_and_proxy_from_the_environment(tmp_path, monkeypatch
     f = tmp_path / "c.txt"
     f.write_text("x")
     monkeypatch.setenv("YT_COOKIES_FILE", str(f))
-    assert ingest.ytdlp()[:3] == ["yt-dlp", "--cookies", str(f)]
+    cmd = ingest.ytdlp()
+    assert cmd[1] == "--cookies" and cmd[2] != str(f)  # yt-dlp never rewrites the user's file
+    assert Path(cmd[2]).read_text() == "x\n"
+    assert ingest.ytdlp()[2] == cmd[2]  # reused while the file is unchanged
+
+    f.write_text(".youtube.com\tTRUE\t/\tTRUE\t0\tA\t\n")  # replaced; last value empty
+    os.utime(f, ns=(1, 1))
+    fresh = ingest.ytdlp()[2]
+    assert fresh != cmd[2] and not Path(cmd[2]).exists()  # a long `watch` sees new cookies
+    assert Path(fresh).read_text() == ".youtube.com\tTRUE\t/\tTRUE\t0\tA\t\n"
+    Path(fresh).unlink()
+
+
+def test_ytdlp_calls_running_at_once_never_share_a_cookies_file(monkeypatch):
+    """yt-dlp rewrites --cookies on exit; six trend searches sharing one file read it half-written."""
+    import threading
+
+    from autoclipper import ingest
+
+    monkeypatch.delenv("YT_COOKIES_FILE", raising=False)
+    monkeypatch.setenv("YT_COOKIES", "# Netscape HTTP Cookie File")
+    files, ready = [], threading.Barrier(3)
+
+    def call():
+        ready.wait()  # all three alive at once, so no thread id is reused
+        files.append(ingest.ytdlp("x")[2])
+        files.append(ingest.ytdlp("y")[2])
+
+    threads = [threading.Thread(target=call) for _ in range(3)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert len(set(files)) == 3  # one file per thread, reused by that thread's calls
+    for name in set(files):
+        assert Path(name).read_text().startswith("# Netscape")
+        Path(name).unlink()
 
 
 def test_youtube_auth_manual_swaps_code_for_token_from_a_pasted_url(tmp_path, monkeypatch):

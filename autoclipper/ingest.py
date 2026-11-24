@@ -9,6 +9,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import threading
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -21,28 +22,40 @@ log = logging.getLogger(__name__)
 FEED_DEPTH = 8  # newest uploads looked at per creator per run
 
 
-_cookie_tmp: Path | None = None
+_cookie_tmp: dict[int, tuple[object, Path]] = {}
+_cookie_lock = threading.Lock()
 
 
 def _cookies_file() -> str | None:
     """YouTube answers datacenter IPs (GitHub runners) with 'sign in to confirm you're not a bot';
     a logged-in browser's cookies get past it. YT_COOKIES_FILE = path to a Netscape cookies.txt,
-    or YT_COOKIES = its contents (the form a repo secret takes), written once to a private temp
-    file that goes away with the process."""
-    global _cookie_tmp
+    or YT_COOKIES = its contents (the form a repo secret takes). yt-dlp rewrites its cookies file
+    when it exits, so calls running at once (the trend searches) would read each other's
+    half-written file: each thread gets its own private copy, gone with the process, and made
+    afresh when YT_COOKIES_FILE is replaced."""
     path = os.environ.get("YT_COOKIES_FILE")
     if path and Path(path).is_file():
-        return path
-    blob = os.environ.get("YT_COOKIES", "").strip()
-    if not blob:
-        return None
-    if _cookie_tmp is None or not _cookie_tmp.exists():
+        source: object = (path, Path(path).stat().st_mtime_ns)
+    else:
+        path = None
+        source = os.environ.get("YT_COOKIES", "")
+    tid = threading.get_ident()
+    with _cookie_lock:
+        seen, tmp = _cookie_tmp.get(tid, (None, None))
+        if tmp is not None and seen == source and tmp.exists():
+            return str(tmp)
+        blob = Path(path).read_text() if path else str(source)
+        if not blob.strip():
+            return None
         fd, name = tempfile.mkstemp(suffix=".txt", prefix="yt-cookies-")
         with os.fdopen(fd, "w") as f:  # mkstemp => 0600, owner only
-            f.write(blob + "\n")
-        _cookie_tmp = Path(name)
-        atexit.register(lambda p=_cookie_tmp: p.unlink(missing_ok=True))
-    return str(_cookie_tmp)
+            f.write(blob.lstrip().rstrip("\r\n") + "\n")  # an empty last value keeps its tab
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+        tmp = Path(name)
+        _cookie_tmp[tid] = (source, tmp)
+        atexit.register(lambda p=tmp: p.unlink(missing_ok=True))
+        return str(tmp)
 
 
 def ytdlp(*args: str) -> list[str]:
