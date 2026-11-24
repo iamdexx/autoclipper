@@ -650,7 +650,10 @@ def fetch_footage(
             str(out),
             c.url,
         )
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        except subprocess.TimeoutExpired:  # a slow upload: try the next one
+            r = subprocess.CompletedProcess(cmd, 1, "", "download timed out after 600s")
         if r.returncode == 0 and out.exists() and has_video(out):
             entry.video_id = c.id
             source.write_text(c.id)

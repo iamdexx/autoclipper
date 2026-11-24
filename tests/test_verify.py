@@ -506,6 +506,32 @@ def test_footage_window_is_each_storys_own(tmp_path, monkeypatch):
     assert spans[0] != spans[1] and all(30 <= a and b <= 299 for a, b in spans)
 
 
+def test_footage_download_timeout_tries_the_next_upload(tmp_path, monkeypatch):
+    """A window that does not download in time is one slow upload, not a failed video."""
+    cfg = _cfg(tmp_path)
+    cands = [
+        trends.Candidate("slow", "GTA 6 gameplay no commentary", "Fan", 600, 9),
+        trends.Candidate("fast", "GTA 6 gameplay no commentary", "Fan", 600, 8),
+    ]
+    monkeypatch.setattr(trends, "yt_search", lambda q, n, **k: cands)
+    monkeypatch.setattr(top10, "footage_matches", lambda e, t: True)
+    monkeypatch.setattr(top10, "has_video", lambda p: True)
+
+    def download(cmd, **k):
+        out = Path(cmd[cmd.index("-o") + 1])
+        if cmd[-1].endswith("slow"):
+            out.with_suffix(".mp4.part").write_text("x")
+            raise subprocess.TimeoutExpired(cmd, k["timeout"])
+        out.write_text("x")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(top10.subprocess, "run", download)
+    entry = top10.Entry(0, "", "", "GTA 6 gameplay no commentary")
+    got = top10.fetch_footage(entry, 60, tmp_path, cfg)
+    assert got is not None and got.exists() and entry.video_id == "fast"
+    assert not list(tmp_path.glob("*.part"))
+
+
 def test_top10_footage_skips_blocked_channels_and_excluded_titles(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
     cfg.trends.blocked_channels = ["Rockstar Games"]
