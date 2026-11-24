@@ -832,8 +832,8 @@ def test_ytdlp_gets_cookies_and_proxy_from_the_environment(tmp_path, monkeypatch
     assert ingest.ytdlp("-J", "u") == ["yt-dlp", "-J", "u"]
 
     monkeypatch.setenv(
-        "YT_COOKIES", "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tA\tb"
-    )
+        "YT_COOKIES", "  # Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tA\tb"
+    )  # pasted with indentation
     monkeypatch.setenv("YT_PROXY", "http://u:p@host:8080")
     cmd = ingest.ytdlp("-J", "u")
     assert cmd[:1] + cmd[3:] == ["yt-dlp", "--proxy", "http://u:p@host:8080", "-J", "u"]

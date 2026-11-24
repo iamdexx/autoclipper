@@ -49,7 +49,7 @@ def _cookies_file() -> str | None:
             return None
         fd, name = tempfile.mkstemp(suffix=".txt", prefix="yt-cookies-")
         with os.fdopen(fd, "w") as f:  # mkstemp => 0600, owner only
-            f.write(blob.strip("\r\n") + "\n")  # an empty last value keeps its tab
+            f.write(blob.lstrip().rstrip("\r\n") + "\n")  # an empty last value keeps its tab
         if tmp is not None:
             tmp.unlink(missing_ok=True)
         tmp = Path(name)
