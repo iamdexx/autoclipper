@@ -1692,6 +1692,13 @@ def test_every_third_explainer_is_on_an_open_subject(tmp_path, monkeypatch):
         trends, "_llm", lambda p, c: '{"topic": "Best Premier League goals", "wiki": "x"}'
     )
     assert top10.pick_topic(cfg, ["a", "b"]) is None  # never a subject on the exclusion list
+    monkeypatch.setattr(
+        trends,
+        "_llm",
+        lambda p, c: '{"topic": "How Humans Survived The Ice Age", "wiki": "Last Glacial Period"}',
+    )
+    used = ["How humans survived the Ice Age"] + [f"t{i}" for i in range(43)]
+    assert top10.pick_topic(cfg, used) is None  # a question made before, outside the prompt's 40
 
 
 def test_own_scripted_video_is_not_pruned_for_being_off_focus(tmp_path):

@@ -988,6 +988,9 @@ def open_idea(cfg: Config, used: list[str]) -> tuple[str, str] | None:
     except Exception as e:
         log.warning("no open explainer idea (%s)", e)
         return None
+    if any(topic.lower() == u.lower() or same_story(topic, u) for u in used):
+        log.info("open explainer idea %r was already made; skipping it", topic)
+        return None
     return (topic, wiki) if topic and trends.rights_ok(topic, "", cfg) else None
 
 
