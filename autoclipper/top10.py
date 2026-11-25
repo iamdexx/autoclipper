@@ -181,7 +181,7 @@ def _slug(s: str) -> str:
 
 SUBJECT_PROMPT = """A short video will answer: "{topic}"
 Which ONE English Wikipedia article tells that story? Answer with the exact title of the article
-and nothing else."""
+and nothing else, or NONE if no article tells it."""
 
 ARTICLE_RETRY_S = 20
 _articles: dict[str, tuple[verify.Evidence, ...]] = {}
@@ -195,16 +195,27 @@ def _article(topic: str, cfg: Config | None) -> tuple[verify.Evidence, ...]:
         try:
             lines = trends._llm(SUBJECT_PROMPT.format(topic=topic), cfg).strip().splitlines()
             name = lines[-1].strip(" \"'*.") if lines else ""
-            if 0 < len(name) <= 100:
+            if 0 < len(name) <= 100 and name.upper() != "NONE":
                 queries.insert(0, name)
         except Exception as e:
             log.warning("could not name the article for %r: %s", topic, e)
     for q in queries:
         # capped once, here: the writer and the fact-check judge are shown the same paragraphs
         found = tuple(verify.wiki_extract(q, chars=24000)[:60])
-        if found:
-            log.info("article for %r: %s", topic, found[0].title.split(":")[0])
-            return found
+        if not found:
+            continue
+        title = found[0].title.split(":")[0]
+        # "no article covers this" searched as words finds 'Wikipedia' itself; an article the
+        # model named exactly is kept ("How did the free encyclopedia get its name?")
+        if (
+            "wikipedia" in title.lower()
+            and "wikipedia" not in topic.lower()
+            and title.lower() != q.lower()
+        ):
+            log.info("article %r for %r is about Wikipedia; not using it", title, topic)
+            continue
+        log.info("article for %r: %s", topic, title)
+        return found
     return ()
 
 
