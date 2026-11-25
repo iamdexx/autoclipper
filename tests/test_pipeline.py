@@ -1701,6 +1701,9 @@ def test_every_third_explainer_is_on_an_open_subject(tmp_path, monkeypatch):
     assert top10.pick_topic(cfg, used) is None  # a question made before, outside the prompt's 40
     used[0] = "When did the last Ice Age end?"
     assert top10.pick_topic(cfg, used)[0] == "How Humans Survived The Ice Age"  # another question
+    told = ["How Did Humans Survive the Ice Age?"]  # a finished title, in other words
+    assert top10.open_idea(cfg, used, told) is None
+    assert top10.open_idea(cfg, used, ["Why the Ice Age Ended"])
 
 
 def test_own_scripted_video_is_not_pruned_for_being_off_focus(tmp_path):

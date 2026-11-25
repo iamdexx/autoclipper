@@ -978,9 +978,9 @@ def build(script: Script, cfg: Config, vdir: Path) -> Path:
     return _finish(parts, script.title, cfg, vdir)
 
 
-def open_idea(cfg: Config, used: list[str]) -> tuple[str, str] | None:
+def open_idea(cfg: Config, used: list[str], made: Sequence[str] = ()) -> tuple[str, str] | None:
     """(question, Wikipedia article) for an explainer on any subject, or None when the writer is
-    unavailable."""
+    unavailable or the question was already asked (`used` topics) or told (`made` titles)."""
     try:
         raw = trends._llm(IDEA_PROMPT.format(used="; ".join(used[-40:]) or "(none yet)"), cfg)
         j = json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
@@ -992,7 +992,7 @@ def open_idea(cfg: Config, used: list[str]) -> tuple[str, str] | None:
     def norm(x: str) -> str:
         return " ".join(x.lower().split()).strip(" ?!.")
 
-    if any(norm(topic) == norm(u) for u in used):
+    if any(norm(topic) == norm(u) for u in used) or any(same_story(topic, m) for m in made):
         log.info("open explainer idea %r was already made; skipping it", topic)
         return None
     return (topic, wiki) if topic and trends.rights_ok(topic, "", cfg) else None
@@ -1008,7 +1008,7 @@ def pick_topic(cfg: Config, used: list[str], state=None) -> tuple[str, str] | No
         return None
     t = cfg.top10
     if t.style == "explainer" and t.open_topic_every and (len(used) + 1) % t.open_topic_every == 0:
-        idea = open_idea(cfg, used)
+        idea = open_idea(cfg, used, state.made_titles("top10") if state else ())
         if idea:
             return idea
     found = trends.discover(cfg)
