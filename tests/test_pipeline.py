@@ -1692,6 +1692,18 @@ def test_every_third_explainer_is_on_an_open_subject(tmp_path, monkeypatch):
         trends, "_llm", lambda p, c: '{"topic": "Best Premier League goals", "wiki": "x"}'
     )
     assert top10.pick_topic(cfg, ["a", "b"]) is None  # never a subject on the exclusion list
+    monkeypatch.setattr(
+        trends,
+        "_llm",
+        lambda p, c: '{"topic": "How Humans Survived The Ice Age", "wiki": "Last Glacial Period"}',
+    )
+    used = ["How humans survived the Ice Age"] + [f"t{i}" for i in range(43)]
+    assert top10.pick_topic(cfg, used) is None  # a question made before, outside the prompt's 40
+    used[0] = "When did the last Ice Age end?"
+    assert top10.pick_topic(cfg, used)[0] == "How Humans Survived The Ice Age"  # another question
+    told = ["How Did Humans Survive the Ice Age?"]  # a finished title, in other words
+    assert top10.open_idea(cfg, used, told) is None
+    assert top10.open_idea(cfg, used, ["Why the Ice Age Ended"])
 
 
 def test_own_scripted_video_is_not_pruned_for_being_off_focus(tmp_path):
@@ -2170,6 +2182,24 @@ def test_explainer_focus_only_takes_topics_from_the_main_pillars(tmp_path, monke
     found[:] = [trends.Topic("xbox sale", "google"), trends.Topic("GTA 6 sales", "google")]
     assert top10.pick_topic(cfg, [])[0] == "GTA 6 sales"
     assert [p.name for p in cfg.trends.pillars] == ["map", "consoles"]  # clips keep the whole mix
+
+
+def test_shipped_config_makes_two_game_explainers_per_open_subject_one(tmp_path, monkeypatch):
+    from autoclipper import top10, trends
+
+    cfg = _cfg(tmp_path)
+    assert cfg.top10.style == "explainer" and cfg.top10.focus_only
+    monkeypatch.setattr(
+        trends,
+        "_llm",
+        lambda p, c: '{"topic": "How the Panama Canal was built", "wiki": "Panama Canal"}',
+    )
+    game = trends.Topic("vice city map", "yt", pillar=cfg.trends.pillars[0].name)
+    monkeypatch.setattr(trends, "discover", lambda c: [game])
+    monkeypatch.setattr(trends, "pick_topics", lambda topics, c, used, **k: topics)
+    picks = [top10.pick_topic(cfg, ["x"] * n)[0] for n in range(6)]
+    assert picks.count("How the Panama Canal was built") == 2
+    assert picks.count("vice city map") == 4
 
 
 def test_a_handed_off_video_is_checked_and_queued_once(tmp_path, monkeypatch):
