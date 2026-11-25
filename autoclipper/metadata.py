@@ -5,7 +5,9 @@ Injury In The Ring" says nothing about who, where or when. The LLM rewrites it i
 title that names the real people / teams / event from the source video and the clip's own
 transcript, writes a 1-2 sentence description that credits the source, and picks specific
 hashtags (people, event, niche) instead of the generic #clips #fyp spam. Anything the clip doesn't
-show stays out - the inputs are the same fact-checked hook and transcript the video was cut from.
+show stays out - the inputs are the same fact-checked hook and transcript the video was cut from,
+and a clip's written title and description are checked against that transcript too (the template
+replaces them unless the check finds them supported).
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 
-from . import top10, trends
+from . import top10, trends, verify
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -193,6 +195,13 @@ def describe(
     if len(title) < 12 or not desc:
         log.warning("metadata too thin (%r); using template", title)
         return fb
+    if kind == "clip":
+        chk = verify.check_title(title, desc, transcript, source_title, channel, cfg)
+        if not verify.passes(chk, cfg, strict=True):
+            log.warning(
+                "metadata rejected (%s %s): %r; using template", chk.verdict, chk.note, title
+            )
+            return fb
     log.info("metadata: %r %s [%s]", title, " ".join(tags), category)
     return PostMeta(title, desc, tags, category)
 

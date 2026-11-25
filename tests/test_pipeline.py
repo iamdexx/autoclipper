@@ -924,6 +924,8 @@ def test_metadata_describe_writes_searchable_title_and_specific_tags(tmp_path, m
 
     def llm(prompt, cfg):
         prompts.append(prompt)
+        if prompt.startswith("TITLE CHECK"):
+            return '{"verdict": "supported", "confidence": 0.9, "note": "ok"}'
         return json.dumps(
             {
                 "title": "Will Ospreay vs Jon Moxley: The Injury That Silenced AEW All Out 2026 ",
@@ -948,6 +950,40 @@ def test_metadata_describe_writes_searchable_title_and_specific_tags(tmp_path, m
     assert pm.hashtags == ["#WillOspreay", "#JonMoxley", "#aew", "#Wrestling", "#AllOut", "#shorts"]
     p = prompts[0]
     assert "Ospreay is down" in p and "All Elite Wrestling" in p and "Clip from" in p
+
+
+def test_clip_title_crediting_the_channel_with_someone_elses_find_uses_the_template(
+    tmp_path, monkeypatch
+):
+    from autoclipper import metadata
+
+    cfg = _cfg(tmp_path)
+    verdict = {"v": '{"verdict": "unsupported", "confidence": 0.9, "note": "ex-garbit found it"}'}
+    checked = []
+
+    def llm(prompt, c):
+        if prompt.startswith("TITLE CHECK"):
+            checked.append(prompt)
+            return verdict["v"]
+        return (
+            '{"title": "MrWasted Finds GTA 6 Tower Egg Callback", '
+            '"description": "MrWasted climbs the tower. Clip from MrWasted.", "hashtags": []}'
+        )
+
+    monkeypatch.setattr(metadata.trends, "_llm", llm)
+    args = ("Egg hits a Tommy lookalike", "", "ex-garbit threw the egg from the tower")
+    args += ("I Found Every Old GTA Character Hiding in GTA 6", "MrWasted", [], cfg)
+    pm = metadata.describe(*args)
+    assert (
+        pm.title == "Egg hits a Tommy lookalike | I Found Every Old GTA Character Hiding in GTA 6"
+    )
+    assert pm.description.endswith("Clip from MrWasted.") and "climbs" not in pm.description
+    assert "ex-garbit threw the egg" in checked[0] and "MrWasted Finds" in checked[0]
+    # a check that could not run does not let the written title through either
+    verdict["v"] = "not json"
+    assert metadata.describe(*args).title.startswith("Egg hits a Tommy lookalike |")
+    verdict["v"] = '{"verdict": "supported", "confidence": 0.9, "note": "ok"}'
+    assert metadata.describe(*args).title == "MrWasted Finds GTA 6 Tower Egg Callback"
 
 
 def test_metadata_falls_back_to_template_when_llm_is_off_or_thin(tmp_path, monkeypatch):
@@ -1018,14 +1054,17 @@ def test_metadata_category_from_llm_or_keywords(tmp_path, monkeypatch):
         "description": "x",
         "hashtags": [],
     }
-    monkeypatch.setattr(
-        metadata.trends, "_llm", lambda p, c: json.dumps({**good, "category": "Sports"})
-    )
-    assert metadata.describe("h", "", "", "s", "c", [], cfg).category == "sports"
+    ok = '{"verdict": "supported", "confidence": 0.9, "note": "ok"}'
+
+    def llm(category):
+        return lambda p, c: (
+            ok if p.startswith("TITLE CHECK") else json.dumps({**good, "category": category})
+        )
+
+    monkeypatch.setattr(metadata.trends, "_llm", llm("Sports"))
+    assert metadata.describe("h", "", "Allen wins it", "s", "c", [], cfg).category == "sports"
     # unknown / missing category -> keywords in the title, transcript and tags decide
-    monkeypatch.setattr(
-        metadata.trends, "_llm", lambda p, c: json.dumps({**good, "category": "vlog"})
-    )
+    monkeypatch.setattr(metadata.trends, "_llm", llm("vlog"))
     assert (
         metadata.describe("h", "", "touchdown in overtime", "s", "c", ["#nfl"], cfg).category
         == "sports"

@@ -342,6 +342,48 @@ def check_take(take: str, transcript: str, cfg: Config, full: str = "") -> Check
     return chk
 
 
+TITLE_PROMPT = """TITLE CHECK. This upload TITLE and DESCRIPTION go out with a short clip cut from
+the video "{source_title}" by {channel}. Naming {channel} as the source is fine ("{channel}: ...",
+"Clip from {channel}."). Everything else stated as fact - who found, made, did, said or showed
+something, names, numbers, outcomes - must be in the CLIP TRANSCRIPT or the source title.
+Crediting {channel} (or anyone) with something the transcript credits to someone else or does not
+mention is unsupported.
+Return ONLY JSON: {{"verdict": "supported|unsupported", "confidence": <0-1>, "note": "<one sentence>"}}
+
+TITLE: {title}
+DESCRIPTION: {description}
+CLIP TRANSCRIPT: {transcript}
+"""
+
+
+def check_title(
+    title: str, description: str, transcript: str, source_title: str, channel: str, cfg: Config
+) -> Check:
+    """Upload title + description against the clip they are posted with. A check that could not
+    run stays 'unverifiable'."""
+    chk = Check(claim=title)
+    if not transcript.strip():
+        chk.note = "no transcript for this window"
+        return chk
+    try:
+        prompt = TITLE_PROMPT.format(
+            title=title,
+            description=description,
+            transcript=transcript[:4000],
+            source_title=source_title or "(untitled)",
+            channel=channel or "the original creator",
+        )
+        j = json.loads(re.search(r"\{.*\}", trends._llm(prompt, cfg), re.S).group(0))
+        v = str(j.get("verdict", "")).lower()
+        chk.verdict = v if v in VERDICTS else "unverifiable"
+        chk.confidence = float(j.get("confidence", 0) or 0)
+        chk.note = str(j.get("note", ""))[:300]
+    except Exception as e:
+        log.warning("title check failed (%s)", e)
+        chk.note = f"check failed: {e}"[:300]
+    return chk
+
+
 def check_hook(hook: str, transcript: str, cfg: Config) -> tuple[Check, str]:
     """(check, replacement) - replacement is '' when the hook is fine or no fix was offered."""
     chk = Check(claim=hook)
