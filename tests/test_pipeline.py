@@ -2172,6 +2172,24 @@ def test_explainer_focus_only_takes_topics_from_the_main_pillars(tmp_path, monke
     assert [p.name for p in cfg.trends.pillars] == ["map", "consoles"]  # clips keep the whole mix
 
 
+def test_shipped_config_makes_two_game_explainers_per_open_subject_one(tmp_path, monkeypatch):
+    from autoclipper import top10, trends
+
+    cfg = _cfg(tmp_path)
+    assert cfg.top10.style == "explainer" and cfg.top10.focus_only
+    monkeypatch.setattr(
+        trends,
+        "_llm",
+        lambda p, c: '{"topic": "How the Panama Canal was built", "wiki": "Panama Canal"}',
+    )
+    game = trends.Topic("vice city map", "yt", pillar=cfg.trends.pillars[0].name)
+    monkeypatch.setattr(trends, "discover", lambda c: [game])
+    monkeypatch.setattr(trends, "pick_topics", lambda topics, c, used, **k: topics)
+    picks = [top10.pick_topic(cfg, ["x"] * n)[0] for n in range(6)]
+    assert picks.count("How the Panama Canal was built") == 2
+    assert picks.count("vice city map") == 4
+
+
 def test_a_handed_off_video_is_checked_and_queued_once(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
     folder = tmp_path / "handoff"
