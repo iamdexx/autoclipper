@@ -2056,10 +2056,10 @@ def test_explainer_has_no_article_when_wikipedia_has_none(tmp_path, monkeypatch)
 
     def extract(q, chars=0):
         asked.append(q)
-        if "wikipedia" in q.lower() or "portal" in q.lower():
-            return [verify.Evidence("article", "Reliability of Wikipedia: The reliability of")]
         if q == "Wikipedia":
             return [verify.Evidence("article", "Wikipedia: a free online encyclopedia")]
+        if "wikipedia" in q.lower() or "portal" in q.lower():
+            return [verify.Evidence("article", "Reliability of Wikipedia: The reliability of")]
         return []
 
     monkeypatch.setattr(verify, "wiki_extract", extract)
@@ -2071,9 +2071,13 @@ def test_explainer_has_no_article_when_wikipedia_has_none(tmp_path, monkeypatch)
     monkeypatch.setattr(trends, "_llm", lambda p, c: "No English Wikipedia article covers this")
     assert top10.article_for(topic, cfg) == []
     # a story about Wikipedia keeps its article
-    monkeypatch.setattr(trends, "_llm", lambda p, c: "Wikipedia")
+    monkeypatch.setattr(trends, "_llm", lambda p, c: "Reliability of Wikipedia")
     got = top10.article_for("Why did Wikipedia go dark in 2012?", cfg)
     assert [e.title for e in got] == ["Reliability of Wikipedia: The reliability of"]
+    # so does one the model names exactly, even when the question does not say "Wikipedia"
+    monkeypatch.setattr(trends, "_llm", lambda p, c: "Wikipedia")
+    got = top10.article_for("How did the free encyclopedia get its name?", cfg)
+    assert [e.title for e in got] == ["Wikipedia: a free online encyclopedia"]
 
 
 def test_a_story_about_a_game_is_shown_over_the_game_before_any_photo(tmp_path, monkeypatch):

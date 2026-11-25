@@ -205,8 +205,13 @@ def _article(topic: str, cfg: Config | None) -> tuple[verify.Evidence, ...]:
         if not found:
             continue
         title = found[0].title.split(":")[0]
-        # "no article covers this" searched as words finds 'Wikipedia' itself
-        if "wikipedia" in title.lower() and "wikipedia" not in topic.lower():
+        # "no article covers this" searched as words finds 'Wikipedia' itself; an article the
+        # model named exactly is kept ("How did the free encyclopedia get its name?")
+        if (
+            "wikipedia" in title.lower()
+            and "wikipedia" not in topic.lower()
+            and title.lower() != q.lower()
+        ):
             log.info("article %r for %r is about Wikipedia; not using it", title, topic)
             continue
         log.info("article for %r: %s", topic, title)
