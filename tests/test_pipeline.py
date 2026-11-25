@@ -2048,6 +2048,34 @@ def test_explainer_article_is_the_one_the_model_names(tmp_path, monkeypatch):
     assert top10.article_for("Busy topic", cfg) == [] and asked[-2:] == ["Busy", "Busy"]
 
 
+def test_explainer_has_no_article_when_wikipedia_has_none(tmp_path, monkeypatch):
+    from autoclipper import top10, trends, verify
+
+    cfg = _cfg(tmp_path)
+    asked = []
+
+    def extract(q, chars=0):
+        asked.append(q)
+        if "wikipedia" in q.lower() or "portal" in q.lower():
+            return [verify.Evidence("article", "Reliability of Wikipedia: The reliability of")]
+        if q == "Wikipedia":
+            return [verify.Evidence("article", "Wikipedia: a free online encyclopedia")]
+        return []
+
+    monkeypatch.setattr(verify, "wiki_extract", extract)
+    monkeypatch.setattr(top10, "_articles", {})
+    topic = "You Can Open a Portal to Original VICE CITY in GTA 6"
+    monkeypatch.setattr(trends, "_llm", lambda p, c: "NONE")
+    assert top10.article_for(topic, cfg) == [] and asked == [topic]
+    monkeypatch.setattr(top10, "_articles", {})
+    monkeypatch.setattr(trends, "_llm", lambda p, c: "No English Wikipedia article covers this")
+    assert top10.article_for(topic, cfg) == []
+    # a story about Wikipedia keeps its article
+    monkeypatch.setattr(trends, "_llm", lambda p, c: "Wikipedia")
+    got = top10.article_for("Why did Wikipedia go dark in 2012?", cfg)
+    assert [e.title for e in got] == ["Reliability of Wikipedia: The reliability of"]
+
+
 def test_a_story_about_a_game_is_shown_over_the_game_before_any_photo(tmp_path, monkeypatch):
     from autoclipper import images, top10
 
