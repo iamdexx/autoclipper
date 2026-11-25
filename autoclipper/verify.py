@@ -374,9 +374,12 @@ def check_title(
             channel=channel or "the original creator",
         )
         j = json.loads(re.search(r"\{.*\}", trends._llm(prompt, cfg), re.S).group(0))
+        conf = j.get("confidence")
+        if isinstance(conf, bool) or not isinstance(conf, (int, float)) or not 0 <= conf <= 1:
+            raise ValueError(f"confidence must be a number from 0 to 1, got {conf!r}")
         v = str(j.get("verdict", "")).lower()
         chk.verdict = v if v in VERDICTS else "unverifiable"
-        chk.confidence = float(j.get("confidence", 0) or 0)
+        chk.confidence = float(conf)
         chk.note = str(j.get("note", ""))[:300]
     except Exception as e:
         log.warning("title check failed (%s)", e)

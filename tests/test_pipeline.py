@@ -982,6 +982,9 @@ def test_clip_title_crediting_the_channel_with_someone_elses_find_uses_the_templ
     # a check that could not run does not let the written title through either
     verdict["v"] = "not json"
     assert metadata.describe(*args).title.startswith("Egg hits a Tommy lookalike |")
+    for conf in ("true", "5", '"high"'):
+        verdict["v"] = f'{{"verdict": "supported", "confidence": {conf}, "note": "ok"}}'
+        assert metadata.describe(*args).title.startswith("Egg hits a Tommy lookalike |")
     verdict["v"] = '{"verdict": "supported", "confidence": 0.9, "note": "ok"}'
     assert metadata.describe(*args).title == "MrWasted Finds GTA 6 Tower Egg Callback"
 
