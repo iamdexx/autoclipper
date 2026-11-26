@@ -53,7 +53,7 @@ _PHRASES = [
     r"here'?s why (?:it|this) matters",
     r"impactful",
     r"tactical layer",
-    r"ultimate",
+    r"ultimate(?! editions?\b)",  # "Ultimate Edition" is a product, not hype
 ]
 _RX = re.compile(r"\b(?:" + "|".join(_PHRASES) + r")\b", re.I)
 
