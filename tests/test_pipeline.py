@@ -1416,12 +1416,16 @@ def test_filler_is_caught_and_plain_facts_are_not():
         "You will not believe what GTA 6 changed.",
         "Requiring key cloners adds a completely fresh tactical layer.",
         "Wait for what he says about natural disasters.",
+        "This is the ultimate GTA 6 secret.",
+        "The Ultimate Edition is the ultimate deal.",
     ):
         assert slop.filler(line), line
     for line in (
         "Rockstar says some parked cars need a key cloner.",
         "Filling the tank takes about ten seconds, and Rockstar has not said how often.",
         "Wilder was not there",  # whole words only
+        "The GTA 6 Ultimate Edition adds the Vice City Pack for $30 more.",  # a product name
+        "Both Ultimate Editions ship on November 19.",
     ):
         assert not slop.filler(line), line
 
