@@ -11,8 +11,11 @@ import json
 import logging
 import os
 import re
+import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from . import slop, tools
 from .config import Config
@@ -201,6 +204,32 @@ GEMINI_MODELS = [
 ]
 
 
+# A vision request carries its pictures inline; NVIDIA refuses one over 25 MB. A Wikipedia lead
+# "thumbnail" can be the unscaled original (an animated GIF of many MB), so anything that is not
+# already a small JPEG is sent as one still frame, at most VISION_MAX_SIDE pixels on its long side.
+VISION_MAX_SIDE = 1600
+VISION_MAX_BYTES = 2_000_000
+
+
+def _vision_jpeg(b: bytes) -> bytes:
+    if b[:3] == b"\xff\xd8\xff" and len(b) <= VISION_MAX_BYTES:
+        return b
+    side = VISION_MAX_SIDE
+    scale = f"scale='min({side},iw)':'min({side},ih)':force_original_aspect_ratio=decrease"
+    with tempfile.TemporaryDirectory() as d:  # a GIF cannot be read from a pipe
+        src, dst = Path(d) / "in", Path(d) / "out.jpg"
+        src.write_bytes(b)
+        try:
+            subprocess.run(
+                ["ffmpeg", "-v", "error", "-i", str(src), "-frames:v", "1", "-vf", scale,
+                 "-q:v", "3", str(dst)],
+                capture_output=True, timeout=60, check=True,
+            )  # fmt: skip
+            return dst.read_bytes() or b
+        except (OSError, subprocess.SubprocessError):
+            return b
+
+
 def _call_gemini(prompt: str, model: str | None, images: list[bytes] | None = None) -> str:
     """`images`: JPEGs sent along with the prompt, in order."""
     import requests
@@ -208,7 +237,12 @@ def _call_gemini(prompt: str, model: str | None, images: list[bytes] | None = No
     key = _gemini_key()
     models = [model] if model else GEMINI_MODELS
     pics = [
-        {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(b).decode()}}
+        {
+            "inline_data": {
+                "mime_type": "image/jpeg",
+                "data": base64.b64encode(_vision_jpeg(b)).decode(),
+            }
+        }
         for b in images or []
     ]
     body = {
@@ -293,7 +327,9 @@ def _call_nvidia(prompt: str, model: str | None, images: list[bytes] | None = No
         content = [
             {
                 "type": "image_url",
-                "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(b).decode()},
+                "image_url": {
+                    "url": "data:image/jpeg;base64," + base64.b64encode(_vision_jpeg(b)).decode()
+                },
             }
             for b in images
         ] + [{"type": "text", "text": prompt}]

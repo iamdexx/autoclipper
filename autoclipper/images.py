@@ -125,7 +125,28 @@ def _download(url: str, out: Path) -> bool:
     except requests.RequestException as e:
         log.warning("image download failed %s: %s", url, e)
         return False
-    return is_image(out)
+    return _as_still_jpeg(out) and is_image(out)
+
+
+def _as_still_jpeg(path: Path) -> bool:
+    """Rewrite `path` as one still JPEG frame when it is something else (a PNG, or an animated
+    GIF that the renderer cannot loop). False when it cannot be read as a picture."""
+    if path.read_bytes()[:3] == b"\xff\xd8\xff":
+        return True
+    raw = path.with_suffix(".src")
+    path.replace(raw)
+    try:
+        subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-i", str(raw), "-frames:v", "1", "-q:v", "2",
+             "-f", "image2", "-c:v", "mjpeg", str(path)],
+            capture_output=True, timeout=120, check=True,
+        )  # fmt: skip
+    except (OSError, subprocess.SubprocessError):
+        path.unlink(missing_ok=True)
+        return False
+    finally:
+        raw.unlink(missing_ok=True)
+    return True
 
 
 def is_image(path: Path) -> bool:

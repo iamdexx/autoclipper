@@ -2446,3 +2446,56 @@ def test_hashtags_fold_accents_instead_of_dropping_letters():
         "#Brand",
         "#shorts",
     ]
+
+
+def test_vision_pictures_are_sent_as_one_small_jpeg_each(tmp_path, monkeypatch):
+    # a Wikipedia lead "thumbnail" can be the unscaled original: here an animated GIF
+    gif = tmp_path / "spin.gif"
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=2400x1800:rate=5",
+         "-t", "2", str(gif)],
+        check=True,
+    )  # fmt: skip
+    big = gif.read_bytes()
+    small = rank._vision_jpeg(big)
+    assert small[:3] == b"\xff\xd8\xff" and len(small) < len(big)
+    shot = tmp_path / "shot.jpg"
+    shot.write_bytes(small)
+    w, h = (int(x) for x in subprocess.check_output(
+        ["ffprobe", "-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0",
+         str(shot)], text=True).strip().split(","))  # fmt: skip
+    assert (w, h) == (1600, 1200)
+    assert rank._vision_jpeg(small) == small  # a small JPEG goes as it is
+    assert rank._vision_jpeg(b"not a picture") == b"not a picture"
+
+    # a downloaded GIF is kept as one still JPEG, which the renderer can loop
+    from autoclipper import images
+
+    class Got:
+        status_code, content = 200, big
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(images.requests, "get", lambda *a, **k: Got())
+    kept = tmp_path / "lead.jpg"
+    assert images._download("https://upload.wikimedia.org/spin.gif", kept)
+    assert kept.read_bytes()[:3] == b"\xff\xd8\xff" and not kept.with_suffix(".src").exists()
+    render.render_still(kept, 1.0, None, [], _cfg(tmp_path), tmp_path / "beat.mp4")
+    assert (tmp_path / "beat.mp4").stat().st_size > 0
+    Got.content = b"not a picture"
+    assert not images._download("https://example.com/x.gif", kept) and not kept.exists()
+
+    sent = []
+
+    class R:
+        status_code, text = 200, "ok"
+
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(rank, "_nvidia_key", lambda: "n")
+    monkeypatch.setattr(rank, "_nvidia_post", lambda m, c, timeout=240: sent.append(c) or R())
+    assert rank._call_nvidia("look", None, images=[big]) == "ok"
+    url = sent[-1][0]["image_url"]["url"]
+    assert url == "data:image/jpeg;base64," + __import__("base64").b64encode(small).decode()
