@@ -2468,6 +2468,24 @@ def test_vision_pictures_are_sent_as_one_small_jpeg_each(tmp_path, monkeypatch):
     assert rank._vision_jpeg(small) == small  # a small JPEG goes as it is
     assert rank._vision_jpeg(b"not a picture") == b"not a picture"
 
+    # a downloaded GIF is kept as one still JPEG, which the renderer can loop
+    from autoclipper import images
+
+    class Got:
+        status_code, content = 200, big
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(images.requests, "get", lambda *a, **k: Got())
+    kept = tmp_path / "lead.jpg"
+    assert images._download("https://upload.wikimedia.org/spin.gif", kept)
+    assert kept.read_bytes()[:3] == b"\xff\xd8\xff" and not kept.with_suffix(".src").exists()
+    render.render_still(kept, 1.0, None, [], _cfg(tmp_path), tmp_path / "beat.mp4")
+    assert (tmp_path / "beat.mp4").stat().st_size > 0
+    Got.content = b"not a picture"
+    assert not images._download("https://example.com/x.gif", kept) and not kept.exists()
+
     sent = []
 
     class R:
