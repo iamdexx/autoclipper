@@ -337,18 +337,22 @@ def pick_topics(
         else ""
     )
     try:
-        raw = _llm(
-            PICK_TOPICS.format(
-                niches=t.focus or ", ".join(t.niches) or "anything viral",
-                n=len(slots) or t.topics_per_run,
-                used=", ".join(used[-50:]) or "nothing",
-                history=f"How this channel's past videos did: {history}" if history else "",
-                mix=mix,
-                trending=listing,
-            ),
-            cfg,
+        prompt = PICK_TOPICS.format(
+            niches=t.focus or ", ".join(t.niches) or "anything viral",
+            n=len(slots) or t.topics_per_run,
+            used=", ".join(used[-50:]) or "nothing",
+            history=f"How this channel's past videos did: {history}" if history else "",
+            mix=mix,
+            trending=listing,
         )
-        items = rank._parse_json_array(raw)
+        for last in (False, True):  # a model now and then answers with no JSON: ask again
+            try:
+                items = rank._parse_json_array(_llm(prompt, cfg))
+                break
+            except ValueError as e:
+                if last:
+                    raise
+                log.warning("topic pick answer had no JSON (%s); asking again", e)
     except Exception as e:
         log.warning("topic pick failed (%s); using top traffic", e)
         items = [

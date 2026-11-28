@@ -153,6 +153,24 @@ def test_pick_topics_uses_llm_choice(tmp_path, monkeypatch):
     assert picked[0].hashtags == ["#a", "#b"]
 
 
+def test_pick_topics_asks_again_when_the_answer_has_no_json(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    good = json.dumps([{"topic": "Cool", "query": "cool", "angle": "why"}])
+    answers = iter(["Sure! Here are the topics.", good])
+    monkeypatch.setattr(trends, "_llm", lambda prompt, cfg_: next(answers))
+    topics = [Topic("cool", "g", 1), Topic("hot", "g", 900)]
+    picked = trends.pick_topics(topics, cfg, used=[])
+    assert [t.name for t in picked] == ["cool"]  # the picker's choice, not the top traffic
+
+
+def test_pick_topics_falls_back_when_the_prompt_cannot_be_built(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.trends.focus, cfg.trends.niches = "", [2048]  # an unquoted YAML number
+    monkeypatch.setattr(trends, "_llm", lambda prompt, cfg_: "[]")
+    picked = trends.pick_topics([Topic("hot", "g", 900)], cfg, used=[])
+    assert [t.name for t in picked] == ["hot"]
+
+
 def _mix(cfg):
     from autoclipper.config import Pillar
 
