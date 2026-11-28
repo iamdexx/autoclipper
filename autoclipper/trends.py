@@ -336,15 +336,15 @@ def pick_topics(
         if slots
         else ""
     )
-    prompt = PICK_TOPICS.format(
-        niches=t.focus or ", ".join(t.niches) or "anything viral",
-        n=len(slots) or t.topics_per_run,
-        used=", ".join(used[-50:]) or "nothing",
-        history=f"How this channel's past videos did: {history}" if history else "",
-        mix=mix,
-        trending=listing,
-    )
     try:
+        prompt = PICK_TOPICS.format(
+            niches=t.focus or ", ".join(t.niches) or "anything viral",
+            n=len(slots) or t.topics_per_run,
+            used=", ".join(used[-50:]) or "nothing",
+            history=f"How this channel's past videos did: {history}" if history else "",
+            mix=mix,
+            trending=listing,
+        )
         for last in (False, True):  # a model now and then answers with no JSON: ask again
             try:
                 items = rank._parse_json_array(_llm(prompt, cfg))

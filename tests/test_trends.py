@@ -163,6 +163,14 @@ def test_pick_topics_asks_again_when_the_answer_has_no_json(tmp_path, monkeypatc
     assert [t.name for t in picked] == ["cool"]  # the picker's choice, not the top traffic
 
 
+def test_pick_topics_falls_back_when_the_prompt_cannot_be_built(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    cfg.trends.focus, cfg.trends.niches = "", [2048]  # an unquoted YAML number
+    monkeypatch.setattr(trends, "_llm", lambda prompt, cfg_: "[]")
+    picked = trends.pick_topics([Topic("hot", "g", 900)], cfg, used=[])
+    assert [t.name for t in picked] == ["hot"]
+
+
 def _mix(cfg):
     from autoclipper.config import Pillar
 
